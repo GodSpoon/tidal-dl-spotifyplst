@@ -8,10 +8,10 @@ bundled key is now rate-limited / region-restricted for some accounts).
 """
 from __future__ import annotations
 
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
+
 
 from .manifest import Manifest
 

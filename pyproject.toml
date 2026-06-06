@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotify-to-tidal"
+version = "0.1.0"
+description = "End-to-end Spotify → Tidal library downloader"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "GodSpoon" }]
+keywords = ["spotify", "tidal", "download", "music", "library"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "requests>=2.28",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "bandit>=1.7",
+    "pyflakes>=3.0",
+]
+
+[project.scripts]
+spotify-to-tidal = "spotify_to_tidal.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/GodSpoon/tidal-dl-spotifyplst"
+Issues = "https://github.com/GodSpoon/tidal-dl-spotifyplst/issues"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra -q"

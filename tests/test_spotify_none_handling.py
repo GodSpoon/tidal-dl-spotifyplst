@@ -12,12 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from spotify_to_tidal.spotify import (  # noqa: E402
-    SpotifyAlbum,
-    SpotifyArtist,
-    SpotifyClient,
-    SpotifyTrack,
-)
+from spotify_to_tidal.spotify import SpotifyClient  # noqa: E402
+
 
 
 def test_artist_handles_none_genres_and_images():
