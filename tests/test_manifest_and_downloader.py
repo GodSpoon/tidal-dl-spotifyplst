@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -184,7 +185,7 @@ def test_run_tidal_dl_retries_on_429_then_succeeds(tmp_path, monkeypatch):
     ])
     calls: list[dict] = []
 
-    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
         calls.append({"capture_output": capture_output})
         if len(calls) == 1:
             return _FakeResult(1)  # streamed first attempt: non-zero
@@ -219,7 +220,7 @@ def test_run_tidal_dl_does_not_retry_non_429_error(tmp_path, monkeypatch):
     NOT trigger a retry — we only recover from rate-limits."""
     inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
     calls: list[dict] = []
-    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
         calls.append({"capture_output": capture_output})
         if len(calls) == 1:
             return _FakeResult(2)  # streamed
@@ -246,7 +247,7 @@ def test_run_tidal_dl_gives_up_after_max_429_retries(tmp_path, monkeypatch):
     inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
     calls: list[dict] = []
     sleep_count = 0
-    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
         nonlocal sleep_count
         calls.append({"capture_output": capture_output})
         if capture_output:
@@ -268,6 +269,29 @@ def test_run_tidal_dl_gives_up_after_max_429_retries(tmp_path, monkeypatch):
     # streamed, captured, streamed, captured, streamed = 5 invocations
     # before the 2nd retry's check (attempt >= max) trips
     assert len(calls) == 5
+
+
+def test_run_tidal_dl_times_out_on_hung_chunk(tmp_path, monkeypatch):
+    """If tiddl hangs longer than chunk_timeout, we kill it and move on."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
+        calls.append({"capture_output": capture_output, "timeout": timeout})
+        raise subprocess.TimeoutExpired(cmd="tiddl", timeout=timeout)
+
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=0,
+        chunk_timeout=5.0,
+        sleep_fn=lambda _s: None,
+    )
+    assert rc == 1
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == 5.0
 
 if __name__ == "__main__":
     import pytest

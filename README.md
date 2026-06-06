@@ -44,10 +44,10 @@ pipx install tidal-dl
 
 ```bash
 # Spotify (browser PKCE)
-python -m spotify_to_tidal login
+python3 -m spotify_to_tidal login
 
 # Tidal — for the search/match stage (uses tidal-dl internally)
-python -m spotify_to_tidal tidal-login
+python3 -m spotify_to_tidal tidal-login
 #   (or, if tidal-dl isn't logged in yet: just run `tidal-dl` once)
 
 # Tidal — for the download stage (uses tiddl, separate session)
@@ -57,7 +57,7 @@ tiddl auth login
 ## Run the full pipeline
 
 ```bash
-python -m spotify_to_tidal run
+python3 -m spotify_to_tidal run
 ```
 
 This will:
@@ -72,9 +72,9 @@ This will:
 ## Run each stage independently
 
 ```bash
-python -m spotify_to_tidal build   --manifest output/manifest.json
-python -m spotify_to_tidal match   --manifest output/manifest.json
-python -m spotify_to_tidal download --manifest output/manifest.json
+python3 -m spotify_to_tidal build   --manifest output/manifest.json
+python3 -m spotify_to_tidal match   --manifest output/manifest.json
+python3 -m spotify_to_tidal download --manifest output/manifest.json
 
 # Tidal's API rate-limits (HTTP 429) some downloads mid-run; both
 # `download` and `run` auto-retry those chunks with exponential backoff.
@@ -83,7 +83,7 @@ python -m spotify_to_tidal download --manifest output/manifest.json
 # already wrote.
 
 # inspect a manifest
-python -m spotify_to_tidal show -v --manifest output/manifest.json
+python3 -m spotify_to_tidal show -v --manifest output/manifest.json
 ```
 
 ## Post-processing (optional)
@@ -92,13 +92,13 @@ Once downloads finish you can organise, transcode, and generate playlists:
 
 ```bash
 # Move files from tiddl_downloads into your library (e.g., Navidrome/Plexamp)
-python -m spotify_to_tidal organize
+python3 -m spotify_to_tidal organize
 
 # Transcode FLAC → MP3 with FFmpeg (Apple-Silicon-optimised V0 VBR by default)
-python -m spotify_to_tidal transcode
+python3 -m spotify_to_tidal transcode
 
 # Generate .m3u8 playlists in the library directory
-python -m spotify_to_tidal playlists
+python3 -m spotify_to_tidal playlists
 ```
 
 Enable automatic Git versioning of the library by setting

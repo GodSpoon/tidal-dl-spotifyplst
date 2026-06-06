@@ -106,6 +106,7 @@ def cmd_download(args, cfg):
         input_filename=args.input_filename,
         chunk_size=args.download_chunk_size,
         max_429_retries=args.max_429_retries,
+        chunk_timeout=args.download_chunk_timeout,
     )
     return 0
 
@@ -148,6 +149,7 @@ def cmd_run(args, cfg):
             skip_download=args.skip_download,
             download_chunk_size=args.download_chunk_size,
             download_max_429_retries=args.max_429_retries,
+            download_chunk_timeout=args.download_chunk_timeout,
         )
     except TidalNotLoggedIn as e:
         print(f"[ERR] {e}")
@@ -260,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-429-retries", type=int, default=4,
                     help="Times to re-run a chunk that hit Tidal's HTTP 429 "
                          "rate limit, with exponential backoff. Default 4.")
+    sp.add_argument("--download-chunk-timeout", type=float, default=300.0,
+                    help="Seconds to wait for one chunk before killing tiddl "
+                         "(prevents hangs on stuck streams). Default 300.")
     sp.set_defaults(func=cmd_download)
 
     sp = sub.add_parser("show", help="Print manifest summary.")
@@ -278,6 +283,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-429-retries", type=int, default=4,
                     help="Times to re-run a chunk that hit Tidal's HTTP 429 "
                          "rate limit, with exponential backoff. Default 4.")
+    sp.add_argument("--download-chunk-timeout", type=float, default=300.0,
+                    help="Seconds to wait for one chunk before killing tiddl "
+                         "(prevents hangs on stuck streams). Default 300.")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("organize", help="Move downloaded files into the library directory.")

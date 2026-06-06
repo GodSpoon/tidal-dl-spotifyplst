@@ -266,6 +266,7 @@ def download_from_manifest(
     input_filename: str = "tiddl-input.txt",
     chunk_size: int = 100,
     max_429_retries: int = 4,
+    chunk_timeout: float = 300.0,
 ) -> Path:
     input_path = cfg.output_dir / input_filename
     track_n, album_n = build_tidal_input_file(manifest, input_path)
@@ -276,6 +277,7 @@ def download_from_manifest(
         quality=cfg.tidal_quality,
         chunk_size=chunk_size,
         max_429_retries=max_429_retries,
+        chunk_timeout=chunk_timeout,
     )
     if rc != 0:
         print(f"[!] tiddl exited with status {rc}.")
@@ -290,6 +292,7 @@ def run_all(
     skip_download: bool = False,
     download_chunk_size: int = 100,
     download_max_429_retries: int = 4,
+    download_chunk_timeout: float = 300.0,
 ) -> Manifest:
     if manifest_path.exists():
         print(f"[i] Loading existing manifest from {manifest_path}")
@@ -319,5 +322,6 @@ def run_all(
             cfg, m,
             chunk_size=download_chunk_size,
             max_429_retries=download_max_429_retries,
+            chunk_timeout=download_chunk_timeout,
         )
     return m

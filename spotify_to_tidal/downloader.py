@@ -104,6 +104,7 @@ def run_tidal_dl(
     extra_args: list[str] | None = None,
     chunk_size: int = 100,
     max_429_retries: int = 4,
+    chunk_timeout: float = 300.0,
     sleep_fn=time.sleep,
 ) -> int:
     """Stream every URL in `input_file` to `tiddl download url`.
@@ -130,7 +131,6 @@ def run_tidal_dl(
         s = line.strip()
         if s and not s.startswith("#"):
             urls.append(s)
-    if not urls:
     if not urls:
         print("[!] No Tidal URLs found in input file; nothing to do.")
         return 0
@@ -161,6 +161,7 @@ def run_tidal_dl(
             chunk_size=len(chunk),
             max_429_retries=max_429_retries,
             sleep_fn=sleep_fn,
+            chunk_timeout=chunk_timeout,
         )
         last_rc = rc if rc != 0 else last_rc
     return last_rc
@@ -174,6 +175,7 @@ def _run_chunk_with_429_retry(
     chunk_size: int,
     max_429_retries: int,
     sleep_fn,
+    chunk_timeout: float = 300.0,
 ) -> int:
     """Invoke `tiddl` for one chunk; retry on 429 with exponential backoff.
 
@@ -184,6 +186,10 @@ def _run_chunk_with_429_retry(
     `2 ** attempt` seconds (capped at 60) and re-run the same chunk;
     tiddl's default `--skip` makes the retry cheap because already-
     downloaded tracks are recognized and skipped.
+
+    `chunk_timeout` (default 300s) prevents tiddl from hanging forever
+    on a stuck track stream. If the timeout fires we kill the process
+    and treat it as a non-retryable error so the pipeline continues.
     """
     attempt = 0
     while True:
@@ -192,7 +198,15 @@ def _run_chunk_with_429_retry(
             f"({chunk_size} URLs)"
             + (f", attempt {attempt + 1}" if attempt else "")
         )
-        result = subprocess.run(cmd, check=False)
+        try:
+            result = subprocess.run(cmd, check=False, timeout=chunk_timeout)
+        except subprocess.TimeoutExpired:
+            print(
+                f"[!] tiddl chunk {chunk_index} timed out after "
+                f"{chunk_timeout}s (likely hung on a track stream); "
+                f"continuing with next chunk"
+            )
+            return 1
         if result.returncode == 0:
             return 0
         if max_429_retries <= 0 or attempt >= max_429_retries:
@@ -204,7 +218,17 @@ def _run_chunk_with_429_retry(
         # Re-run with captured output to confirm this is a 429 (not
         # e.g. a malformed URL or tiddl crash). Already-downloaded tracks
         # in the chunk are skipped by tiddl's default --skip behavior.
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        try:
+            result = subprocess.run(
+                cmd, check=False, capture_output=True, text=True,
+                timeout=chunk_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            print(
+                f"[!] tiddl chunk {chunk_index} timed out on retry after "
+                f"{chunk_timeout}s; continuing with next chunk"
+            )
+            return 1
         combined = (result.stdout or "") + "\n" + (result.stderr or "")
         if result.returncode == 0:
             return 0
