@@ -55,3 +55,4 @@ tiddl_downloads/
 
 # Allow the example file even if .env* is ignored above
 !.env.example
+.claude/

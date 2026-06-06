@@ -1,4 +1,5 @@
-"""Tests for manifest serialization and tidal-dl input file generation."""
+"""Tests for manifest serialization, tidal-dl input file generation, and the
+429-retry wrapper around tiddl in the downloader."""
 from __future__ import annotations
 
 import json
@@ -15,7 +16,10 @@ from spotify_to_tidal.manifest import (  # noqa: E402
     PlaylistEntry,
     new_manifest,
 )
-from spotify_to_tidal.downloader import build_tidal_input_file  # noqa: E402
+from spotify_to_tidal.downloader import (  # noqa: E402
+    build_tidal_input_file,
+    run_tidal_dl,
+)
 
 
 def _sample_manifest() -> Manifest:
@@ -156,6 +160,114 @@ def test_manifest_handles_missing_optional_fields(tmp_path: Path):
     m.compute_stats()
     assert m.stats["playlists"] == 1
 
+
+
+def _write_input(tmp_path: Path, urls: list[str]) -> Path:
+    p = tmp_path / "urls.txt"
+    p.write_text("\n".join(urls) + "\n", encoding="utf-8")
+    return p
+
+
+class _FakeResult:
+    def __init__(self, rc: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = rc
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_run_tidal_dl_retries_on_429_then_succeeds(tmp_path, monkeypatch):
+    """A chunk that 429s on the first attempt and succeeds on the second
+    must trigger exactly one retry and return 0 overall."""
+    inp = _write_input(tmp_path, [
+        "https://tidal.com/track/1",
+        "https://tidal.com/track/2",
+    ])
+    calls: list[dict] = []
+
+    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+        calls.append({"capture_output": capture_output})
+        if len(calls) == 1:
+            return _FakeResult(1)  # streamed first attempt: non-zero
+        if len(calls) == 2:
+            # captured diagnostic run: shows a 429 line
+            return _FakeResult(
+                1,
+                stdout="API Error: Response body does not contain valid json., 429/0 (track/1)\n",
+            )
+        return _FakeResult(0)  # retry succeeds
+    sleeps: list[float] = []
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=3,
+        sleep_fn=sleeps.append,
+    )
+    assert rc == 0
+    assert len(calls) == 3, f"expected 1 streamed + 1 captured + 1 retried, got {calls}"
+    # first run streamed (no capture), diagnostic run captured, retry streamed
+    assert calls[0]["capture_output"] is False
+    assert calls[1]["capture_output"] is True
+    assert calls[2]["capture_output"] is False
+    # one backoff sleep, ~2s
+    assert sleeps == [2]
+
+
+def test_run_tidal_dl_does_not_retry_non_429_error(tmp_path, monkeypatch):
+    """A chunk that errors out for a non-429 reason (e.g. tiddl crash) must
+    NOT trigger a retry — we only recover from rate-limits."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+        calls.append({"capture_output": capture_output})
+        if len(calls) == 1:
+            return _FakeResult(2)  # streamed
+        if len(calls) == 2:
+            return _FakeResult(2, stderr="Traceback ... ValueError: nope\n")
+        return _FakeResult(0)  # unreachable
+    sleeps: list[float] = []
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=3,
+        sleep_fn=sleeps.append,
+    )
+    assert rc == 2
+    assert len(calls) == 2  # streamed + captured diagnostic, then gave up
+    assert sleeps == []  # no backoff
+
+
+def test_run_tidal_dl_gives_up_after_max_429_retries(tmp_path, monkeypatch):
+    """If a chunk keeps 429ing past max_429_retries, we stop retrying and
+    return tiddl's last rc."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+    sleep_count = 0
+    def fake_run(cmd, check=False, capture_output=False, text=False):  # noqa: ARG001
+        nonlocal sleep_count
+        calls.append({"capture_output": capture_output})
+        if capture_output:
+            sleep_count += 1
+            return _FakeResult(
+                1,
+                stdout="API Error: ..., 429/0 (track/1)\n",
+            )
+        return _FakeResult(1)  # streamed attempt: still 429'ing
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=2,
+        sleep_fn=lambda _s: None,
+    )
+    assert rc == 1
+    # streamed, captured, streamed, captured, streamed = 5 invocations
+    # before the 2nd retry's check (attempt >= max) trips
+    assert len(calls) == 5
 
 if __name__ == "__main__":
     import pytest

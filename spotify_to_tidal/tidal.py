@@ -228,7 +228,7 @@ def _login_device_code(tidal_dl_mod) -> bool:
     SETTINGS.read(getProfilePath())
     TOKEN.read(getTokenPath())
     chosen = _pick_working_api_key(tidal_dl_mod)
-    if chosen != SETTINGS.apiKeyIndex:
+    if chosen is not None and chosen != SETTINGS.apiKeyIndex:
         SETTINGS.apiKeyIndex = chosen
         SETTINGS.save()
     return bool(tidal_dl_mod.events.loginByWeb())
@@ -301,9 +301,8 @@ class TidalClient:
         try:
             res = self._api.search(query, type_map[type_name], 0, limit)
         except Exception as e:
-            # CountryCode missing or 401 etc. — return empty.
+            # CountryCode missing or 401 etc. — return empty but do NOT cache.
             print(f"[!] Tidal search failed for {query!r} ({type_name}): {e}")
-            self._search_cache[cache_key] = []
             return []
         if type_name == "tracks":
             items = (res.tracks.items or []) if res.tracks else []
@@ -417,7 +416,6 @@ class TidalClient:
             items = self._api.getArtistAlbums(artist_id, include_ep)
         except Exception as e:
             print(f"[!] getArtistAlbums({artist_id}) failed: {e}")
-            self._albums_by_artist[artist_id] = []
             return []
         out = [
             TidalAlbum(

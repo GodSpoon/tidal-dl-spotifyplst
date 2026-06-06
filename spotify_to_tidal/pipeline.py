@@ -82,6 +82,8 @@ def build_manifest(
                 groups += ",compilation,appears_on"
             try:
                 albums = sc.list_artist_albums(sa.id, include_groups=groups)
+            except KeyboardInterrupt:
+                raise
             except Exception as e:
                 print(f"      [!] Failed listing albums for {sa.name}: {e}")
                 albums = []
@@ -124,6 +126,8 @@ def match_manifest(
                 query = f"{t.name} {primary_artist}".strip()
                 try:
                     cands = tc.search_tracks(query, limit=10)
+                except KeyboardInterrupt:
+                    raise
                 except Exception as e:
                     t.error = f"search error: {e}"
                     continue
@@ -167,7 +171,7 @@ def match_manifest(
             cand_artists = []
         else:
             cand_artists = tc.search_artists(ar.name, limit=5)
-            best_a, info_a = match_artist(ar, cand_artists) if False else _match_artist(ar, cand_artists)
+            best_a, info_a = _match_artist(ar, cand_artists)
             if best_a and info_a.score >= ARTIST_MATCH_THRESHOLD:
                 ar.tidal_id = best_a.id
                 ar.tidal_name = best_a.name
@@ -258,6 +262,8 @@ def download_from_manifest(
     manifest: Manifest,
     *,
     input_filename: str = "tiddl-input.txt",
+    chunk_size: int = 100,
+    max_429_retries: int = 4,
 ) -> Path:
     input_path = cfg.output_dir / input_filename
     track_n, album_n = build_tidal_input_file(manifest, input_path)
@@ -266,14 +272,12 @@ def download_from_manifest(
         input_path,
         output_dir=cfg.tidal_download_dir,
         quality=cfg.tidal_quality,
+        chunk_size=chunk_size,
+        max_429_retries=max_429_retries,
     )
     if rc != 0:
         print(f"[!] tiddl exited with status {rc}.")
     return input_path
-
-
-# ----------------- All-in-one -----------------
-
 def run_all(
     cfg: AppConfig,
     manifest_path: Path,
@@ -282,6 +286,8 @@ def run_all(
     include_artist_albums: bool = True,
     include_playlists: bool = True,
     skip_download: bool = False,
+    download_chunk_size: int = 100,
+    download_max_429_retries: int = 4,
 ) -> Manifest:
     if manifest_path.exists():
         print(f"[i] Loading existing manifest from {manifest_path}")
@@ -307,5 +313,9 @@ def run_all(
     print_summary(m)
 
     if not skip_download:
-        download_from_manifest(cfg, m)
+        download_from_manifest(
+            cfg, m,
+            chunk_size=download_chunk_size,
+            max_429_retries=download_max_429_retries,
+        )
     return m

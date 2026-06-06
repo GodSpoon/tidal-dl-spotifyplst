@@ -4,16 +4,27 @@ We extract every `https://tidal.com/...` URL from the manifest and feed
 them to `tiddl download url` in chunks. tiddl is preferred over the
 older `tidal-dl` because it ships with a Tidal API key that the
 current Tidal CDN accepts for playback URLs (the upstream tidal-dl
-bundled key is now rate-limited / region-restricted for some accounts).
 """
 from __future__ import annotations
 
+
+import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
 from .manifest import Manifest
+
+# tiddl prints rate-limit failures like:
+#   "API Error: Response body does not contain valid json., 429/0 (track/424959206)"
+# 429 = Tidal's per-IP HTTP rate limit; tiddl does not retry by itself.
+# We use this pattern to detect a chunk that hit the limiter and re-run it
+# after a backoff (already-downloaded files are skipped by tiddl's default
+# --skip behavior, so re-running is essentially free for the successes).
+_RATE_LIMIT_RE = re.compile(r"\b429/\d+")
+
 
 
 def _which_tiddl() -> str:
@@ -72,7 +83,9 @@ def run_tidal_dl(
     quality: str = "max",
     tidal_dl_bin: str | None = None,
     extra_args: list[str] | None = None,
-    chunk_size: int = 200,
+    chunk_size: int = 100,
+    max_429_retries: int = 4,
+    sleep_fn=time.sleep,
 ) -> int:
     """Stream every URL in `input_file` to `tiddl download url`.
 
@@ -80,7 +93,13 @@ def run_tidal_dl(
     `build_tidal_input_file` (one `https://tidal.com/...` per line, with
     `#` comments tolerated). tiddl has no batch-input flag, so we chunk
     the URLs into batches of `chunk_size` and invoke the CLI per batch.
-    Returns the exit code of the LAST chunk (0 = all good).
+
+    tiddl does not retry HTTP 429 (Tidal's per-IP rate limit) on its own;
+    if a chunk's output contains a `429/N` line, we re-run the same chunk
+    after exponential backoff. Already-downloaded files are skipped by
+    tiddl's default `--skip` behavior, so re-running is essentially free
+    for the successes. Returns 0 if all chunks succeeded, otherwise the
+    most recent non-zero exit code.
     """
     tidal_dl_bin = tidal_dl_bin or _which_tiddl()
     urls: list[str] = []
@@ -93,10 +112,12 @@ def run_tidal_dl(
         return 0
     print(
         f"[i] tiddl: {len(urls)} URLs, quality={quality!r}, "
-        f"output={output_dir}, chunk={chunk_size}"
+        f"output={output_dir}, chunk={chunk_size}, "
+        f"max_429_retries={max_429_retries}"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     last_rc = 0
+    total_chunks = (len(urls) + chunk_size - 1) // chunk_size
     for i in range(0, len(urls), chunk_size):
         chunk = urls[i : i + chunk_size]
         cmd = [
@@ -109,13 +130,74 @@ def run_tidal_dl(
         ]
         if extra_args:
             cmd.extend(extra_args)
-        print(f"[i] Chunk {i // chunk_size + 1}/{(len(urls) + chunk_size - 1) // chunk_size} "
-              f"({len(chunk)} URLs)")
-        rc = subprocess.call(cmd)
+        rc = _run_chunk_with_429_retry(
+            cmd,
+            chunk_index=i // chunk_size + 1,
+            total_chunks=total_chunks,
+            chunk_size=len(chunk),
+            max_429_retries=max_429_retries,
+            sleep_fn=sleep_fn,
+        )
         last_rc = rc if rc != 0 else last_rc
-        if rc != 0:
-            print(f"[!] tiddl chunk exited with {rc}; continuing with next chunk")
     return last_rc
+
+
+def _run_chunk_with_429_retry(
+    cmd: list[str],
+    *,
+    chunk_index: int,
+    total_chunks: int,
+    chunk_size: int,
+    max_429_retries: int,
+    sleep_fn,
+) -> int:
+    """Invoke `tiddl` for one chunk; retry on 429 with exponential backoff.
+
+    The first attempt streams tiddl's output so the user sees per-track
+    progress. On non-zero exit we do a single captured run to find a
+    `429/N` line in tiddl's logs (so we don't false-positive on unrelated
+    errors like a single track 404'ing). If 429 is detected we sleep
+    `2 ** attempt` seconds (capped at 60) and re-run the same chunk;
+    tiddl's default `--skip` makes the retry cheap because already-
+    downloaded tracks are recognized and skipped.
+    """
+    attempt = 0
+    while True:
+        print(
+            f"[i] Chunk {chunk_index}/{total_chunks} "
+            f"({chunk_size} URLs)"
+            + (f", attempt {attempt + 1}" if attempt else "")
+        )
+        result = subprocess.run(cmd, check=False)
+        if result.returncode == 0:
+            return 0
+        if max_429_retries <= 0 or attempt >= max_429_retries:
+            print(
+                f"[!] tiddl chunk {chunk_index} exited with "
+                f"{result.returncode}; continuing with next chunk"
+            )
+            return result.returncode
+        # Re-run with captured output to confirm this is a 429 (not
+        # e.g. a malformed URL or tiddl crash). Already-downloaded tracks
+        # in the chunk are skipped by tiddl's default --skip behavior.
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        combined = (result.stdout or "") + "\n" + (result.stderr or "")
+        if result.returncode == 0:
+            return 0
+        if not _RATE_LIMIT_RE.search(combined):
+            print(
+                f"[!] tiddl chunk {chunk_index} exited with "
+                f"{result.returncode} (no 429 detected); continuing"
+            )
+            return result.returncode
+        attempt += 1
+        backoff = min(60, 2 ** attempt)
+        print(
+            f"[!] tiddl chunk {chunk_index} hit 429 "
+            f"(attempt {attempt}/{max_429_retries}); "
+            f"sleeping {backoff}s before retry"
+        )
+        sleep_fn(backoff)
 
 
 

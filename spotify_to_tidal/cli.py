@@ -98,7 +98,12 @@ def cmd_download(args, cfg):
         print(f"[ERR] No manifest at {out}. Run `build` (and `match`) first.")
         return 2
     m = Manifest.load_json(out)
-    download_from_manifest(cfg, m, input_filename=args.input_filename)
+    download_from_manifest(
+        cfg, m,
+        input_filename=args.input_filename,
+        chunk_size=args.download_chunk_size,
+        max_429_retries=args.max_429_retries,
+    )
     return 0
 
 
@@ -138,6 +143,8 @@ def cmd_run(args, cfg):
             include_artist_albums=not args.no_artist_albums,
             include_playlists=not args.no_playlists,
             skip_download=args.skip_download,
+            download_chunk_size=args.download_chunk_size,
+            download_max_429_retries=args.max_429_retries,
         )
     except TidalNotLoggedIn as e:
         print(f"[ERR] {e}")
@@ -180,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("download", help="Run tiddl on a matched manifest.")
     sp.add_argument("--input-filename", default="tiddl-input.txt",
                     help="Filename inside output_dir for the tiddl input file.")
+    sp.add_argument("--download-chunk-size", type=int, default=100,
+                    help="URLs per tiddl invocation. Smaller chunks recover "
+                         "faster from a 429 rate-limit. Default 100.")
+    sp.add_argument("--max-429-retries", type=int, default=4,
+                    help="Times to re-run a chunk that hit Tidal's HTTP 429 "
+                         "rate limit, with exponential backoff. Default 4.")
     sp.set_defaults(func=cmd_download)
 
     sp = sub.add_parser("show", help="Print manifest summary.")
@@ -193,6 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-playlists", action="store_true")
     sp.add_argument("--skip-download", action="store_true",
                     help="Stop after building + matching; don't call tidal-dl.")
+    sp.add_argument("--download-chunk-size", type=int, default=100,
+                    help="URLs per tiddl invocation. Default 100.")
+    sp.add_argument("--max-429-retries", type=int, default=4,
+                    help="Times to re-run a chunk that hit Tidal's HTTP 429 "
+                         "rate limit, with exponential backoff. Default 4.")
     sp.set_defaults(func=cmd_run)
 
     return p
