@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.bandit
+
+# Secrets — never commit
+.env
+*.env.local
+*.env.*.local
+
+# Spotify & Tidal cached tokens
+spotify_to_tidal/config/spotify_token.json
+.tidal-dl.token.json
+.tidal-dl.json
+
+# Local AI / dev tooling
+.pi/
+.pi-lens/
+
+# Pipeline artifacts (per-user, contains their own Spotify/Tidal data)
+output/
+download/
+tidal_downloads/
+tiddl_downloads/
+
+# Allow the example file even if .env* is ignored above
+!.env.example
