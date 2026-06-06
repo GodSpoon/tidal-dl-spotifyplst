@@ -37,6 +37,9 @@ from .pipeline import (
 )
 from .tidal import TidalNotLoggedIn, ensure_tidal_logged_in
 
+# New post-processing modules (imported lazily inside commands when possible)
+from . import git_version, organizer, playlists, transcode
+
 
 def _manifest_path(args, cfg) -> Path:
     p = getattr(args, "manifest", None) or (cfg.output_dir / "manifest.json")
@@ -152,6 +155,70 @@ def cmd_run(args, cfg):
     return 0
 
 
+def cmd_organize(args, cfg):
+    out = _manifest_path(args, cfg)
+    if not out.exists():
+        print(f"[ERR] No manifest at {out}.")
+        return 2
+    if not cfg.library_dir:
+        print("[ERR] LIBRARY_DIR not configured. Set it in .env.")
+        return 2
+    m = Manifest.load_json(out)
+    print(f"[i] Organizing into {cfg.library_dir} …")
+    results = organizer.organize_from_manifest(
+        m,
+        organizer.OrganizeConfig(
+            library_dir=cfg.library_dir,
+            schema=cfg.library_schema,
+            copy=args.copy,
+        ),
+    )
+    moved = sum(1 for r in results if r.action in ("moved", "copied"))
+    skipped = sum(1 for r in results if r.action == "skipped")
+    print(f"[OK] {moved} files organized, {skipped} skipped.")
+    if cfg.version_library_with_git:
+        git_version.ensure_library_versioned(cfg.library_dir)
+        git_version.commit_library_changes(
+            cfg.library_dir, f"organize: {moved} files"
+        )
+    return 0
+
+
+def cmd_transcode(args, cfg):
+    root = Path(args.root).expanduser() if args.root else cfg.library_dir
+    if not root:
+        print("[ERR] No library directory configured and --root not given.")
+        return 2
+    print(f"[i] Transcoding lossless files in {root} …")
+    ok, fail = transcode.transcode_directory(
+        root,
+        delete_source=args.delete_source or cfg.delete_source_after_transcode,
+    )
+    print(f"[OK] {ok} transcoded, {fail} failures.")
+    if cfg.version_library_with_git:
+        git_version.ensure_library_versioned(root)
+        git_version.commit_library_changes(root, f"transcode: {ok} files")
+    return 0
+
+
+def cmd_playlists(args, cfg):
+    out = _manifest_path(args, cfg)
+    if not out.exists():
+        print(f"[ERR] No manifest at {out}.")
+        return 2
+    if not cfg.library_dir:
+        print("[ERR] LIBRARY_DIR not configured. Set it in .env.")
+        return 2
+    m = Manifest.load_json(out)
+    written = playlists.write_playlists(m, cfg.library_dir)
+    print(f"[OK] Wrote {len(written)} playlist(s) to {cfg.library_dir / 'playlists'}.")
+    if cfg.version_library_with_git:
+        git_version.ensure_library_versioned(cfg.library_dir)
+        git_version.commit_library_changes(
+            cfg.library_dir, f"playlists: updated {len(written)}"
+        )
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="spotify_to_tidal",
@@ -213,6 +280,19 @@ def build_parser() -> argparse.ArgumentParser:
                          "rate limit, with exponential backoff. Default 4.")
     sp.set_defaults(func=cmd_run)
 
+    sp = sub.add_parser("organize", help="Move downloaded files into the library directory.")
+    sp.add_argument("--copy", action="store_true",
+                    help="Copy instead of move.")
+    sp.set_defaults(func=cmd_organize)
+
+    sp = sub.add_parser("transcode", help="Transcode lossless files to MP3 with FFmpeg.")
+    sp.add_argument("--root", help="Directory to scan (default: LIBRARY_DIR).")
+    sp.add_argument("--delete-source", action="store_true",
+                    help="Remove original lossless files after transcoding.")
+    sp.set_defaults(func=cmd_transcode)
+
+    sp = sub.add_parser("playlists", help="Generate M3U playlists from the manifest.")
+    sp.set_defaults(func=cmd_playlists)
     return p
 
 

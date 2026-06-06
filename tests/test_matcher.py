@@ -112,10 +112,12 @@ def _sp_track(name="Yesterday", isrc="GBUM71505080", duration_ms=125_000,
 
 
 def _t_track(id=253822017, title="Yesterday", duration=125, artist="The Beatles",
-             artists=("The Beatles",), album="Help!", isrc="GBUM71505080", explicit=False, version=""):
+             artists=("The Beatles",), album="Help!", isrc="GBUM71505080", explicit=False, version="",
+             album_id=0):
     return TidalTrack(
         id=id, title=title, duration=duration, artist=artist, artists=list(artists),
         album=album, isrc=isrc, version=version, explicit=explicit, audio_quality="LOSSLESS",
+        album_id=album_id,
     )
 
 

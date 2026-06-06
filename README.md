@@ -76,9 +76,33 @@ python -m spotify_to_tidal build   --manifest output/manifest.json
 python -m spotify_to_tidal match   --manifest output/manifest.json
 python -m spotify_to_tidal download --manifest output/manifest.json
 
+# Tidal's API rate-limits (HTTP 429) some downloads mid-run; both
+# `download` and `run` auto-retry those chunks with exponential backoff.
+# Tunable via --max-429-retries (default 4) and --download-chunk-size
+# (default 100). Re-running is essentially free — tiddl skips files it
+# already wrote.
+
 # inspect a manifest
 python -m spotify_to_tidal show -v --manifest output/manifest.json
 ```
+
+## Post-processing (optional)
+
+Once downloads finish you can organise, transcode, and generate playlists:
+
+```bash
+# Move files from tiddl_downloads into your library (e.g., Navidrome/Plexamp)
+python -m spotify_to_tidal organize
+
+# Transcode FLAC → MP3 with FFmpeg (Apple-Silicon-optimised V0 VBR by default)
+python -m spotify_to_tidal transcode
+
+# Generate .m3u8 playlists in the library directory
+python -m spotify_to_tidal playlists
+```
+
+Enable automatic Git versioning of the library by setting
+`VERSION_LIBRARY_WITH_GIT=true` in `.env`.
 
 ## Why so many subcommands?
 
@@ -99,6 +123,11 @@ Everything lives in `.env`:
 | `OUTPUT_DIR` | `./output` | Manifest and tiddl input file land here. |
 | `TIDAL_DOWNLOAD_DIR` | `./tiddl_downloads` | Where tiddl writes files. |
 | `TIDAL_QUALITY` | `max` | One of `max`, `high`, `normal`, `low` (tiddl's vocabulary). |
+| `LIBRARY_DIR` | – | Destination for organized music (e.g., `/Volumes/media/Audio/Music`). |
+| `LIBRARY_SCHEMA` | `{artist}/{album}/{track}…` | Path template for file organisation. |
+| `TRANSCODE_TO_MP3` | `false` | After download, transcode FLAC → MP3 via FFmpeg. |
+| `DELETE_SOURCE_AFTER_TRANSCODE` | `false` | Remove original lossless files after transcoding. |
+| `VERSION_LIBRARY_WITH_GIT` | `false` | Auto-commit library changes in a local git repo. |
 
 ## Manifest format
 

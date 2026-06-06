@@ -30,6 +30,7 @@ class TidalTrack:
     artist: str
     artists: list[str]
     album: str
+    album_id: int
     isrc: str
     version: str
     explicit: bool
@@ -364,6 +365,7 @@ class TidalClient:
                     artist=self._track_artist_name(t),
                     artists=self._track_all_artist_names(t),
                     album=self._track_album_name(t),
+                    album_id=int(t.album.id) if t.album and hasattr(t.album, "id") else 0,
                     isrc=(t.isrc or "") if hasattr(t, "isrc") else "",
                     version=(t.version or "") if hasattr(t, "version") else "",
                     explicit=bool(getattr(t, "explicit", False)),

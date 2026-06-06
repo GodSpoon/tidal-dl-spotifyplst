@@ -8,6 +8,7 @@ current Tidal CDN accepts for playback URLs (the upstream tidal-dl
 from __future__ import annotations
 
 
+import collections
 import re
 import shutil
 import subprocess
@@ -52,11 +53,29 @@ def build_tidal_input_file(manifest: Manifest, out_path: Path) -> tuple[int, int
     track_n = 0
     album_n = 0
 
-    # Playlists
+    # Playlists — group tracks by Tidal album; emit album URL when ≥2 tracks share one.
     for pl in manifest.playlists:
         lines.append(f"# === Playlist: {pl.name} ({pl.track_count} tracks) ===")
+        # Count matched tracks per Tidal album.
+        album_track_count: dict[int, int] = collections.defaultdict(int)
         for t in pl.tracks:
-            if t.matched and t.tidal_id:
+            if t.matched and t.tidal_id and t.tidal_album_id:
+                album_track_count[t.tidal_album_id] += 1
+        emitted_albums: set[int] = set()
+        for t in pl.tracks:
+            if not (t.matched and t.tidal_id):
+                continue
+            aid = t.tidal_album_id
+            if aid and album_track_count[aid] >= 2:
+                # Whole album is more efficient; emit album URL once.
+                if aid not in emitted_albums:
+                    lines.append(
+                        f"# album: {t.tidal_album or ''} ({album_track_count[aid]} tracks)"
+                    )
+                    lines.append(f"https://tidal.com/browse/album/{aid}")
+                    album_n += 1
+                    emitted_albums.add(aid)
+            else:
                 lines.append(f"https://tidal.com/browse/track/{t.tidal_id}")
                 track_n += 1
         lines.append("")
@@ -101,12 +120,17 @@ def run_tidal_dl(
     for the successes. Returns 0 if all chunks succeeded, otherwise the
     most recent non-zero exit code.
     """
+    # tiddl's Rich console calls `.as_uri()` on the output path; a relative
+    # path raises "relative paths can't be expressed as file URIs".
+    # Resolve to absolute before passing the flag.
+    output_dir = output_dir.resolve()
     tidal_dl_bin = tidal_dl_bin or _which_tiddl()
     urls: list[str] = []
     for line in input_file.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if s and not s.startswith("#"):
             urls.append(s)
+    if not urls:
     if not urls:
         print("[!] No Tidal URLs found in input file; nothing to do.")
         return 0

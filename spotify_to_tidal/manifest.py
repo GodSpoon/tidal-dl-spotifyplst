@@ -43,6 +43,7 @@ class TrackEntry:
     tidal_title: Optional[str] = None
     tidal_artist: Optional[str] = None
     tidal_album: Optional[str] = None
+    tidal_album_id: Optional[int] = None
     tidal_duration: Optional[int] = None
     match_score: Optional[float] = None
     match_reasons: Optional[list[str]] = None
@@ -274,6 +275,7 @@ def _track_from_dict(d: dict) -> TrackEntry:
         tidal_title=d.get("tidal_title"),
         tidal_artist=d.get("tidal_artist"),
         tidal_album=d.get("tidal_album"),
+        tidal_album_id=d.get("tidal_album_id"),
         tidal_duration=d.get("tidal_duration"),
         match_score=d.get("match_score"),
         match_reasons=d.get("match_reasons"),

@@ -45,13 +45,21 @@ class AppConfig:
             "user-library-read",
         ]
     )
+    # Library organisation (new)
+    library_dir: Optional[Path] = None
+    library_schema: str = "{artist}/{album}/{track_num:02d} - {title}.{ext}"
+    # Post-processing toggles (new)
+    transcode_to_mp3: bool = False
+    delete_source_after_transcode: bool = False
+    version_library_with_git: bool = False
 
     def ensure_dirs(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.tidal_download_dir.mkdir(parents=True, exist_ok=True)
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
+        if self.library_dir:
+            self.library_dir.mkdir(parents=True, exist_ok=True)
 
 def _load_env() -> dict[str, str]:
     """Load .env, but real environment variables take precedence."""
@@ -65,6 +73,11 @@ def _load_env() -> dict[str, str]:
         "OUTPUT_DIR",
         "TIDAL_DOWNLOAD_DIR",
         "TIDAL_QUALITY",
+        "LIBRARY_DIR",
+        "LIBRARY_SCHEMA",
+        "TRANSCODE_TO_MP3",
+        "DELETE_SOURCE_AFTER_TRANSCODE",
+        "VERSION_LIBRARY_WITH_GIT",
     ):
         real = os.environ.get(key)
         if real:
@@ -75,6 +88,7 @@ def _load_env() -> dict[str, str]:
 def load_config() -> AppConfig:
     env = _load_env()
     try:
+        library_dir_raw = env.get("LIBRARY_DIR")
         cfg = AppConfig(
             spotify_client_id=env["SPOTIFY_CLIENT_ID"],
             spotify_client_secret=env["SPOTIFY_CLIENT_SECRET"],
@@ -86,6 +100,11 @@ def load_config() -> AppConfig:
                 env.get("TIDAL_DOWNLOAD_DIR", str(PROJECT_ROOT / "tidal_downloads"))
             ).expanduser(),
             tidal_quality=env.get("TIDAL_QUALITY", "max"),
+            library_dir=Path(library_dir_raw).expanduser() if library_dir_raw else None,
+            library_schema=env.get("LIBRARY_SCHEMA", "{artist}/{album}/{track_num:02d} - {title}.{ext}"),
+            transcode_to_mp3=env.get("TRANSCODE_TO_MP3", "").lower() in ("1", "true", "yes"),
+            delete_source_after_transcode=env.get("DELETE_SOURCE_AFTER_TRANSCODE", "").lower() in ("1", "true", "yes"),
+            version_library_with_git=env.get("VERSION_LIBRARY_WITH_GIT", "").lower() in ("1", "true", "yes"),
         )
     except KeyError as e:
         sys.stderr.write(

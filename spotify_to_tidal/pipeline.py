@@ -139,6 +139,7 @@ def match_manifest(
                             t.tidal_title = c.title
                             t.tidal_artist = c.artist
                             t.tidal_album = c.album
+                            t.tidal_album_id = c.album_id
                             t.tidal_duration = c.duration
                             t.match_score = 100.0
                             t.match_reasons = ["isrc"]
@@ -151,6 +152,7 @@ def match_manifest(
                         t.tidal_title = best.title
                         t.tidal_artist = best.artist
                         t.tidal_album = best.album
+                        t.tidal_album_id = best.album_id
                         t.tidal_duration = best.duration
                         t.match_score = round(info.score, 1)
                         t.match_reasons = info.reasons
