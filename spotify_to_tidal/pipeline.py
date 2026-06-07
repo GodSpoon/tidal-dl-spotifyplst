@@ -286,6 +286,7 @@ def download_from_manifest(
         inter_chunk_jitter=inter_chunk_jitter,
         batch_pause_chunks=batch_pause_chunks,
         batch_pause_duration=batch_pause_duration,
+    )
     if rc != 0:
         print(f"[!] tiddl exited with status {rc}.")
     return input_path
