@@ -7,8 +7,8 @@ current Tidal CDN accepts for playback URLs (the upstream tidal-dl
 """
 from __future__ import annotations
 
-
 import collections
+import random
 import re
 import shutil
 import subprocess
@@ -25,8 +25,6 @@ from .manifest import Manifest
 # after a backoff (already-downloaded files are skipped by tiddl's default
 # --skip behavior, so re-running is essentially free for the successes).
 _RATE_LIMIT_RE = re.compile(r"\b429/\d+")
-
-
 
 def _which_tiddl() -> str:
     path = shutil.which("tiddl")
@@ -99,13 +97,18 @@ def run_tidal_dl(
     input_file: Path,
     *,
     output_dir: Path,
-    quality: str = "max",
+    quality: str = "high",
     tidal_dl_bin: str | None = None,
     extra_args: list[str] | None = None,
-    chunk_size: int = 100,
+    chunk_size: int = 25,
     max_429_retries: int = 4,
     chunk_timeout: float = 300.0,
+    inter_chunk_delay: float = 45.0,
+    inter_chunk_jitter: float = 15.0,
+    batch_pause_chunks: int = 50,
+    batch_pause_duration: float = 600.0,
     sleep_fn=time.sleep,
+    random_fn=random.random,
 ) -> int:
     """Stream every URL in `input_file` to `tiddl download url`.
 
@@ -114,12 +117,18 @@ def run_tidal_dl(
     `#` comments tolerated). tiddl has no batch-input flag, so we chunk
     the URLs into batches of `chunk_size` and invoke the CLI per batch.
 
-    tiddl does not retry HTTP 429 (Tidal's per-IP rate limit) on its own;
-    if a chunk's output contains a `429/N` line, we re-run the same chunk
-    after exponential backoff. Already-downloaded files are skipped by
-    tiddl's default `--skip` behavior, so re-running is essentially free
-    for the successes. Returns 0 if all chunks succeeded, otherwise the
-    most recent non-zero exit code.
+    Anti-ban measures:
+    - Default quality "high" (not "max") to reduce API load.
+    - Small chunks (default 25) with a delay + jitter between each.
+    - After every `batch_pause_chunks` chunks, pause for
+      `batch_pause_duration` seconds (default 50 chunks / 10 min).
+    - 429 rate-limit retry with exponential backoff.
+    - chunk_timeout kills hung tiddl processes.
+
+    Already-downloaded files are skipped by tiddl's default `--skip`
+    behavior, so re-running is essentially free for the successes.
+    Returns 0 if all chunks succeeded, otherwise the most recent
+    non-zero exit code.
     """
     # tiddl's Rich console calls `.as_uri()` on the output path; a relative
     # path raises "relative paths can't be expressed as file URIs".
@@ -137,7 +146,9 @@ def run_tidal_dl(
     print(
         f"[i] tiddl: {len(urls)} URLs, quality={quality!r}, "
         f"output={output_dir}, chunk={chunk_size}, "
-        f"max_429_retries={max_429_retries}"
+        f"max_429_retries={max_429_retries}, "
+        f"inter_chunk_delay={inter_chunk_delay}s, "
+        f"batch_pause={batch_pause_chunks}chunks/{batch_pause_duration}s"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     last_rc = 0
@@ -164,8 +175,25 @@ def run_tidal_dl(
             chunk_timeout=chunk_timeout,
         )
         last_rc = rc if rc != 0 else last_rc
+        # Anti-ban: delay between chunks with jitter.
+        next_i = i + chunk_size
+        if next_i < len(urls):
+            jitter = inter_chunk_jitter * (2 * random_fn() - 1)  # ±jitter
+            delay = max(0.0, inter_chunk_delay + jitter)
+            # Anti-ban: long pause after every batch_pause_chunks chunks.
+            chunk_num = (i // chunk_size) + 1
+            if chunk_num % batch_pause_chunks == 0:
+                print(
+                    f"[i] Batch pause: completed {chunk_num} chunks, "
+                    f"sleeping {batch_pause_duration}s to avoid rate limits"
+                )
+                sleep_fn(batch_pause_duration)
+            elif delay > 0:
+                print(
+                    f"[i] Inter-chunk delay: sleeping {delay:.1f}s"
+                )
+                sleep_fn(delay)
     return last_rc
-
 
 def _run_chunk_with_429_retry(
     cmd: list[str],

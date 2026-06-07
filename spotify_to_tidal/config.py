@@ -34,7 +34,7 @@ class AppConfig:
     tidal_download_dir: Path = field(
         default_factory=lambda: PROJECT_ROOT / "tidal_downloads"
     )
-    tidal_quality: str = "max"
+    tidal_quality: str = "high"
     # Where the user normally runs `tidal-dl` from (for its config files)
     tidal_dl_home: Optional[Path] = None
     scopes: list[str] = field(

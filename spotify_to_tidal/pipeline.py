@@ -264,9 +264,13 @@ def download_from_manifest(
     manifest: Manifest,
     *,
     input_filename: str = "tiddl-input.txt",
-    chunk_size: int = 100,
+    chunk_size: int = 25,
     max_429_retries: int = 4,
     chunk_timeout: float = 300.0,
+    inter_chunk_delay: float = 45.0,
+    inter_chunk_jitter: float = 15.0,
+    batch_pause_chunks: int = 50,
+    batch_pause_duration: float = 600.0,
 ) -> Path:
     input_path = cfg.output_dir / input_filename
     track_n, album_n = build_tidal_input_file(manifest, input_path)
@@ -278,10 +282,15 @@ def download_from_manifest(
         chunk_size=chunk_size,
         max_429_retries=max_429_retries,
         chunk_timeout=chunk_timeout,
-    )
+        inter_chunk_delay=inter_chunk_delay,
+        inter_chunk_jitter=inter_chunk_jitter,
+        batch_pause_chunks=batch_pause_chunks,
+        batch_pause_duration=batch_pause_duration,
     if rc != 0:
         print(f"[!] tiddl exited with status {rc}.")
     return input_path
+
+
 def run_all(
     cfg: AppConfig,
     manifest_path: Path,
@@ -290,9 +299,13 @@ def run_all(
     include_artist_albums: bool = True,
     include_playlists: bool = True,
     skip_download: bool = False,
-    download_chunk_size: int = 100,
+    download_chunk_size: int = 25,
     download_max_429_retries: int = 4,
     download_chunk_timeout: float = 300.0,
+    download_inter_chunk_delay: float = 45.0,
+    download_inter_chunk_jitter: float = 15.0,
+    download_batch_pause_chunks: int = 50,
+    download_batch_pause_duration: float = 600.0,
 ) -> Manifest:
     if manifest_path.exists():
         print(f"[i] Loading existing manifest from {manifest_path}")
@@ -323,5 +336,9 @@ def run_all(
             chunk_size=download_chunk_size,
             max_429_retries=download_max_429_retries,
             chunk_timeout=download_chunk_timeout,
+            inter_chunk_delay=download_inter_chunk_delay,
+            inter_chunk_jitter=download_inter_chunk_jitter,
+            batch_pause_chunks=download_batch_pause_chunks,
+            batch_pause_duration=download_batch_pause_duration,
         )
     return m
