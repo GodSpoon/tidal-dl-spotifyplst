@@ -1,21 +1,23 @@
 """End-to-end pipeline orchestration.
 
-Composes: Spotify client → manifest → Tidal matcher → downloader.
+Composes: Spotify client → manifest → Tidal/Qobuz matcher → downloader.
 
 The pipeline is split into stages so each can be re-run independently:
 
   build     - Fetch Spotify data, write manifest.
-  match     - Read manifest, fill in Tidal IDs.
-  download  - Run tidal-dl on the manifest.
+  match     - Read manifest, fill in Tidal/Qobuz IDs.
+  download  - Run the chosen backend(s) on the manifest.
   all       - build + match + download, in one go.
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from .auth import get_token
 from .config import AppConfig
-from .downloader import build_tidal_input_file, run_tidal_dl, print_summary
+from .downloader import print_summary
+from .downloaders import factory, run_backends_in_parallel
 from .manifest import (
     Manifest,
     album_from_spotify,
@@ -100,17 +102,60 @@ def build_manifest(
     return m
 
 
-# ----------------- STAGE 2: match to Tidal -----------------
+# ----------------- STAGE 2: match to Tidal/Qobuz -----------------
 
 def match_manifest(
     cfg: AppConfig,
     manifest: Manifest,
     *,
+    sources: "list[str] | None" = None,
     include_artist_albums: bool = True,
     include_playlists: bool = True,
-    autosave_path: Path | None = None,
+    autosave_path: "Path | None" = None,
     autosave_every: int = 50,
 ) -> Manifest:
+    """Match manifest entries against the requested sources.
+
+    *sources* defaults to ``["tidal"]``.  Pass ``["tidal", "qobuz"]`` to
+    populate both sets of ID fields in the same run.
+    """
+    if sources is None:
+        sources = ["tidal"]
+
+    for source in sources:
+        if source == "tidal":
+            _match_source_tidal(
+                cfg, manifest,
+                include_artist_albums=include_artist_albums,
+                include_playlists=include_playlists,
+                autosave_path=autosave_path,
+                autosave_every=autosave_every,
+            )
+        elif source == "qobuz":
+            _match_source_qobuz(
+                cfg, manifest,
+                include_artist_albums=include_artist_albums,
+                include_playlists=include_playlists,
+                autosave_path=autosave_path,
+                autosave_every=autosave_every,
+            )
+        else:
+            print(f"[!] Unknown source {source!r} — skipping.")
+
+    manifest.compute_stats()
+    return manifest
+
+
+def _match_source_tidal(
+    cfg: AppConfig,
+    manifest: Manifest,
+    *,
+    include_artist_albums: bool,
+    include_playlists: bool,
+    autosave_path: "Path | None",
+    autosave_every: int,
+) -> None:
+    """Fill in Tidal IDs for all manifest entries."""
     ensure_tidal_logged_in()
     tc = TidalClient()
     print("      Tidal OK.")
@@ -118,7 +163,7 @@ def match_manifest(
     # Playlists
     if include_playlists:
         for pi, pl in enumerate(manifest.playlists, 1):
-            print(f"      Playlist {pi}/{len(manifest.playlists)}: {pl.name}")
+            print(f"      [Tidal] Playlist {pi}/{len(manifest.playlists)}: {pl.name}")
             for ti, t in enumerate(pl.tracks, 1):
                 if t.matched and t.tidal_id:
                     continue  # already matched (re-runs)
@@ -219,8 +264,107 @@ def match_manifest(
                         if best else "no candidates"
                     )
 
-    manifest.compute_stats()
-    return manifest
+
+def _match_source_qobuz(
+    cfg: AppConfig,
+    manifest: Manifest,
+    *,
+    include_artist_albums: bool,
+    include_playlists: bool,
+    autosave_path: "Path | None",
+    autosave_every: int,
+) -> None:
+    """Fill in Qobuz IDs for all manifest entries."""
+    from .qobuz import QobuzClient  # noqa: PLC0415 — lazy; module added by QobuzStack agent
+    from .matcher import (  # noqa: PLC0415
+        match_track_qobuz,
+        match_album_qobuz,
+    )
+
+    qobuz_app_id = getattr(cfg, "qobuz_app_id", None)
+    qobuz_auth_token = getattr(cfg, "qobuz_auth_token", None)
+    if not qobuz_app_id:
+        print("      [Qobuz] QOBUZ_APP_ID not configured; skipping Qobuz matching.")
+        return
+    qc = QobuzClient(qobuz_app_id, qobuz_auth_token or "")
+    print("      Qobuz OK.")
+
+    # Playlists
+    if include_playlists:
+        for pi, pl in enumerate(manifest.playlists, 1):
+            print(f"      [Qobuz] Playlist {pi}/{len(manifest.playlists)}: {pl.name}")
+            for ti, t in enumerate(pl.tracks, 1):
+                if getattr(t, "qobuz_id", None):
+                    continue  # already matched
+                primary_artist = t.artists[0] if t.artists else ""
+                query = f"{t.name} {primary_artist}".strip()
+                try:
+                    cands = qc.search_tracks(query, limit=10)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"        [Qobuz] search error for {t.name!r}: {e}")
+                    continue
+                # ISRC pre-filter
+                matched_by_isrc = False
+                if t.isrc:
+                    for c in cands:
+                        if getattr(c, "isrc", None) and c.isrc.upper() == t.isrc.upper():
+                            t.qobuz_id = str(c.id)
+                            t.qobuz_title = c.title
+                            t.qobuz_artist = c.artist
+                            t.qobuz_album = c.album
+                            t.qobuz_album_id = str(c.album_id)
+                            t.qobuz_duration = c.duration
+                            t.matched = True
+                            matched_by_isrc = True
+                            break
+                if not matched_by_isrc:
+                    best, info = match_track_qobuz(t, cands)
+                    if best and info.score >= TRACK_MATCH_THRESHOLD:
+                        t.qobuz_id = str(best.id)
+                        t.qobuz_title = best.title
+                        t.qobuz_artist = best.artist
+                        t.qobuz_album = best.album
+                        t.qobuz_album_id = str(best.album_id)
+                        t.qobuz_duration = best.duration
+                        t.matched = True
+                if ti % 50 == 0:
+                    print(f"        …{ti}/{len(pl.tracks)}")
+                if autosave_path and (ti % autosave_every == 0 or ti == len(pl.tracks)):
+                    manifest.save_json(autosave_path)
+
+    # Artists + albums
+    for ai, ar in enumerate(manifest.artists, 1):
+        if ai % 10 == 0 or ai == len(manifest.artists):
+            print(
+                f"      [Qobuz] Artist {ai}/{len(manifest.artists)}: {ar.name}"
+            )
+        if autosave_path and (ai % autosave_every == 0 or ai == len(manifest.artists)):
+            manifest.save_json(autosave_path)
+
+        if not include_artist_albums:
+            continue
+
+        for al in ar.albums:
+            if getattr(al, "qobuz_id", None):
+                continue
+            query = f"{al.name} {ar.name}".strip()
+            try:
+                cands = qc.search_albums(query, limit=10)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                print(f"        [Qobuz] album search error for {al.name!r}: {e}")
+                continue
+            best, info = match_album_qobuz(al, cands)
+            if best and info.score >= ALBUM_MATCH_THRESHOLD:
+                al.qobuz_id = str(best.id)
+                al.qobuz_title = best.title
+                al.qobuz_artist = best.artist
+                al.qobuz_release_date = getattr(best, "release_date", None)
+                al.qobuz_num_tracks = getattr(best, "total_tracks", None)
+                al.matched = True
 
 
 def _match_artist(ar, cand):
@@ -263,6 +407,8 @@ def download_from_manifest(
     cfg: AppConfig,
     manifest: Manifest,
     *,
+    downloader: "str | list[str] | None" = None,
+    # Legacy tiddl params kept for API compat; respected by TiddlDownloader internally.
     input_filename: str = "tiddl-input.txt",
     chunk_size: int = 15,
     max_429_retries: int = 4,
@@ -271,14 +417,20 @@ def download_from_manifest(
     inter_chunk_jitter: float = 20.0,
     batch_pause_chunks: int = 30,
     batch_pause_duration: float = 900.0,
-) -> Path:
-    input_path = cfg.output_dir / input_filename
-    track_n, album_n = build_tidal_input_file(manifest, input_path)
-    print(f"[3/3] Wrote {track_n} tracks + {album_n} albums to {input_path}")
-    rc = run_tidal_dl(
-        input_path,
-        output_dir=cfg.tidal_download_dir,
-        quality=cfg.tidal_quality,
+) -> int:
+    """Download all matched items in *manifest* via the chosen backend(s).
+
+    Returns 0 on full success; the highest non-zero exit code otherwise.
+
+    When *downloader* is ``"all"``, all backends run in parallel and exit
+    codes are aggregated via ``max``.  For any other value, backends run
+    sequentially and the first non-zero code is returned.
+    """
+    if downloader is None:
+        downloader = cfg.downloader
+
+    kwargs = dict(
+        input_filename=input_filename,
         chunk_size=chunk_size,
         max_429_retries=max_429_retries,
         chunk_timeout=chunk_timeout,
@@ -287,9 +439,36 @@ def download_from_manifest(
         batch_pause_chunks=batch_pause_chunks,
         batch_pause_duration=batch_pause_duration,
     )
-    if rc != 0:
-        print(f"[!] tiddl exited with status {rc}.")
-    return input_path
+
+    # Parallel path: "all" runs every backend concurrently.
+    if downloader == "all":
+        names = factory.get_downloader_names("all")
+        print(f"[3/3] Running all backends in parallel: {names}")
+        rc_dict = run_backends_in_parallel(manifest, cfg, names, **kwargs)
+        for name, rc in rc_dict.items():
+            if rc != 0:
+                print(f"[!] {name} exited with status {rc}.")
+        return max(rc_dict.values()) if rc_dict else 0
+
+    # Sequential path.
+    if isinstance(downloader, list):
+        names = downloader
+    else:
+        names = factory.get_downloader_names(downloader)
+
+    first_error = 0
+    for name in names:
+        backend = factory.get_downloader(name)
+        per_backend_cfg = dataclasses.replace(
+            cfg, tidal_download_dir=cfg.tidal_download_dir / name
+        )
+        print(f"[3/3] Running downloader: {name}")
+        rc = backend.download(manifest, per_backend_cfg, **kwargs)
+        if rc != 0:
+            print(f"[!] {name} exited with status {rc}.")
+            if first_error == 0:
+                first_error = rc
+    return first_error
 
 
 def run_all(
@@ -300,6 +479,8 @@ def run_all(
     include_artist_albums: bool = True,
     include_playlists: bool = True,
     skip_download: bool = False,
+    sources: "list[str] | None" = None,
+    downloader: "str | list[str] | None" = None,
     download_chunk_size: int = 15,
     download_max_429_retries: int = 4,
     download_chunk_timeout: float = 300.0,
@@ -324,6 +505,7 @@ def run_all(
 
     m = match_manifest(
         cfg, m,
+        sources=sources,
         include_artist_albums=include_artist_albums,
         include_playlists=include_playlists,
         autosave_path=manifest_path,
@@ -334,6 +516,7 @@ def run_all(
     if not skip_download:
         download_from_manifest(
             cfg, m,
+            downloader=downloader,
             chunk_size=download_chunk_size,
             max_429_retries=download_max_429_retries,
             chunk_timeout=download_chunk_timeout,

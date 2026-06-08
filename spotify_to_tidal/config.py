@@ -52,6 +52,15 @@ class AppConfig:
     transcode_to_mp3: bool = False
     delete_source_after_transcode: bool = False
     version_library_with_git: bool = False
+    # Downloader backend selection
+    downloader: str = "tiddl"
+    tidarr_url: str = "http://localhost:8484"
+    tidarr_api_key: Optional[str] = None
+    # Multi-source support
+    sources: list[str] = field(default_factory=lambda: ["tidal"])
+    enable_qobuz: bool = False
+    qobuz_app_id: Optional[str] = None
+    qobuz_auth_token: Optional[str] = None
 
     def ensure_dirs(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +87,12 @@ def _load_env() -> dict[str, str]:
         "TRANSCODE_TO_MP3",
         "DELETE_SOURCE_AFTER_TRANSCODE",
         "VERSION_LIBRARY_WITH_GIT",
+        "DOWNLOADER",
+        "TIDARR_URL",
+        "TIDARR_API_KEY",
+        "SOURCES",
+        "QOBUZ_APP_ID",
+        "QOBUZ_AUTH_TOKEN",
     ):
         real = os.environ.get(key)
         if real:
@@ -105,6 +120,13 @@ def load_config() -> AppConfig:
             transcode_to_mp3=env.get("TRANSCODE_TO_MP3", "").lower() in ("1", "true", "yes"),
             delete_source_after_transcode=env.get("DELETE_SOURCE_AFTER_TRANSCODE", "").lower() in ("1", "true", "yes"),
             version_library_with_git=env.get("VERSION_LIBRARY_WITH_GIT", "").lower() in ("1", "true", "yes"),
+            downloader=env.get("DOWNLOADER", "tiddl"),
+            tidarr_url=env.get("TIDARR_URL", "http://localhost:8484"),
+            tidarr_api_key=env.get("TIDARR_API_KEY") or None,
+            sources=[s.strip() for s in env.get("SOURCES", "tidal").split(",") if s.strip()],
+            enable_qobuz="qobuz" in [s.strip() for s in env.get("SOURCES", "tidal").split(",") if s.strip()],
+            qobuz_app_id=env.get("QOBUZ_APP_ID") or None,
+            qobuz_auth_token=env.get("QOBUZ_AUTH_TOKEN") or None,
         )
     except KeyError as e:
         sys.stderr.write(

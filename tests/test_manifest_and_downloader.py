@@ -162,6 +162,94 @@ def test_manifest_handles_missing_optional_fields(tmp_path: Path):
     assert m.stats["playlists"] == 1
 
 
+def test_qobuz_fields_roundtrip(tmp_path: Path):
+    """Qobuz fields on TrackEntry and AlbumEntry survive a JSON round-trip."""
+    import json as _json
+    track = TrackEntry(
+        spotify_id="t_q", spotify_uri="spotify:track:t_q",
+        name="Clair de lune", duration_ms=300000,
+        artists=["Debussy"], album="Pour le piano", album_id="al_q",
+        isrc="FRABX0000001", explicit=False,
+        qobuz_id="12345678",
+        qobuz_title="Clair de lune",
+        qobuz_artist="Debussy",
+        qobuz_album="Pour le piano",
+        qobuz_album_id="98765",
+        qobuz_duration=301,
+        matched=True,
+    )
+    d = _json.loads(_json.dumps(track.__dict__))
+    # Simulate round-trip through _track_from_dict by saving/loading a manifest
+    m = new_manifest("test_user")
+    pl = PlaylistEntry(
+        spotify_id="pl_q", name="Qobuz Pl", owner="test_user",
+        description="", public=False, collaborative=False,
+        track_count=1, tracks=[track],
+    )
+    m.playlists.append(pl)
+    out = tmp_path / "qobuz_rt.json"
+    m.save_json(out)
+    loaded = Manifest.load_json(out)
+    lt = loaded.playlists[0].tracks[0]
+    assert lt.qobuz_id == "12345678"
+    assert lt.qobuz_title == "Clair de lune"
+    assert lt.qobuz_artist == "Debussy"
+    assert lt.qobuz_album == "Pour le piano"
+    assert lt.qobuz_album_id == "98765"
+    assert lt.qobuz_duration == 301
+
+
+def test_qobuz_album_fields_roundtrip(tmp_path: Path):
+    """Qobuz fields on AlbumEntry survive a JSON round-trip."""
+    album = AlbumEntry(
+        spotify_id="al_q", spotify_uri="spotify:album:al_q",
+        name="Pour le piano", artists=["Debussy"],
+        album_type="album", total_tracks=3, release_date="1901-01-01",
+        qobuz_id="qal_001",
+        qobuz_title="Pour le piano",
+        qobuz_artist="Claude Debussy",
+        qobuz_release_date="1901-01-01",
+        qobuz_num_tracks=3,
+        matched=True,
+    )
+    m = new_manifest("test_user2")
+    from spotify_to_tidal.manifest import ArtistEntry
+    ar = ArtistEntry(
+        spotify_id="ar_q", name="Debussy",
+        genres=["classical"], popularity=70, followers=500_000,
+        albums=[album],
+    )
+    m.artists.append(ar)
+    out = tmp_path / "qobuz_al_rt.json"
+    m.save_json(out)
+    loaded = Manifest.load_json(out)
+    la = loaded.artists[0].albums[0]
+    assert la.qobuz_id == "qal_001"
+    assert la.qobuz_title == "Pour le piano"
+    assert la.qobuz_artist == "Claude Debussy"
+    assert la.qobuz_release_date == "1901-01-01"
+    assert la.qobuz_num_tracks == 3
+
+
+def test_qobuz_fields_default_none():
+    """New Qobuz fields default to None on existing construction patterns."""
+    t = TrackEntry(
+        spotify_id="t_x", spotify_uri="spotify:track:t_x",
+        name="Song", duration_ms=180000,
+        artists=["Artist"], album="Album", album_id="al_x",
+        isrc="", explicit=False,
+    )
+    assert t.qobuz_id is None
+    assert t.qobuz_title is None
+    assert t.qobuz_album_id is None
+    assert t.qobuz_duration is None
+    al = AlbumEntry(
+        spotify_id="al_x", spotify_uri="spotify:album:al_x",
+        name="Album", artists=["Artist"],
+        album_type="album", total_tracks=10, release_date="2020-01-01",
+    )
+    assert al.qobuz_id is None
+    assert al.qobuz_num_tracks is None
 
 def _write_input(tmp_path: Path, urls: list[str]) -> Path:
     p = tmp_path / "urls.txt"

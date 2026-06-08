@@ -38,7 +38,7 @@ from .pipeline import (
 from .tidal import TidalNotLoggedIn, ensure_tidal_logged_in
 
 # New post-processing modules (imported lazily inside commands when possible)
-from . import git_version, organizer, playlists, transcode
+from . import git_version, organizer, playlists, transcode, tidarr_mgmt
 
 
 def _manifest_path(args, cfg) -> Path:
@@ -67,6 +67,7 @@ def cmd_build(args, cfg):
         top_artists_total=args.top,
         include_artist_albums=not args.no_artist_albums,
         include_compilations=not args.no_compilations,
+        sources=[s.strip() for s in args.sources.split(",") if s.strip()],
     )
     out = _manifest_path(args, cfg)
     m.save_json(out)
@@ -88,6 +89,7 @@ def cmd_match(args, cfg):
         include_artist_albums=not args.no_artist_albums,
         include_playlists=not args.no_playlists,
         autosave_path=out,
+        sources=[s.strip() for s in args.sources.split(",") if s.strip()],
     )
     m.save_json(out)
     m.save_csv(out.with_suffix(".csv"))
@@ -103,6 +105,7 @@ def cmd_download(args, cfg):
     m = Manifest.load_json(out)
     download_from_manifest(
         cfg, m,
+        downloader=args.downloader,
         input_filename=args.input_filename,
         chunk_size=args.download_chunk_size,
         max_429_retries=args.max_429_retries,
@@ -147,6 +150,8 @@ def cmd_run(args, cfg):
             include_artist_albums=not args.no_artist_albums,
             include_playlists=not args.no_playlists,
             skip_download=args.skip_download,
+            downloader=args.downloader,
+            sources=[s.strip() for s in args.sources.split(",") if s.strip()],
             download_chunk_size=args.download_chunk_size,
             download_max_429_retries=args.max_429_retries,
             download_chunk_timeout=args.download_chunk_timeout,
@@ -225,6 +230,130 @@ def cmd_playlists(args, cfg):
         )
     return 0
 
+
+# ---------------------------------------------------------------------------
+# Tidarr management commands
+# ---------------------------------------------------------------------------
+
+def _check_tidarr(cfg) -> bool:
+    """Return True if Tidarr is configured; print an error and return False otherwise."""
+    if not cfg.tidarr_api_key:
+        print("[ERR] TIDARR_API_KEY is not set. Add it to .env or the environment.")
+        return False
+    return True
+
+
+def cmd_tidarr_sync_list(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    try:
+        items = tidarr_mgmt.list_sync(cfg)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    if not items:
+        print("(no sync items)")
+        return 0
+    for item in items:
+        print(f"  {item.get('id', '?')}\t{item.get('type', '?')}\t{item.get('title', '?')}\t{item.get('url', '')}")
+    return 0
+
+
+def cmd_tidarr_sync_add(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    title = args.title or args.url
+    try:
+        ok = tidarr_mgmt.add_sync(cfg, args.url, title, args.type)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    if ok:
+        print(f"[OK] Added sync item: {title}")
+    else:
+        print("[ERR] Tidarr rejected the request.")
+        return 1
+    return 0
+
+
+def cmd_tidarr_sync_remove(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    try:
+        ok = tidarr_mgmt.remove_sync(cfg, args.id)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    if ok:
+        print(f"[OK] Removed sync item {args.id}.")
+    else:
+        print("[ERR] Tidarr rejected the removal.")
+        return 1
+    return 0
+
+
+def cmd_tidarr_sync_trigger(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    try:
+        ok = tidarr_mgmt.trigger_sync(cfg)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    if ok:
+        print("[OK] Sync triggered.")
+    else:
+        print("[ERR] Tidarr rejected the trigger request.")
+        return 1
+    return 0
+
+
+def cmd_tidarr_history(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    try:
+        entries = tidarr_mgmt.list_history(cfg)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    if not entries:
+        print("(no history entries)")
+        return 0
+    for entry in entries:
+        print(f"  {entry}")
+    return 0
+
+
+def cmd_tidarr_queue(args, cfg):
+    if not _check_tidarr(cfg):
+        return 1
+    if args.clear:
+        try:
+            ok = tidarr_mgmt.clear_queue(cfg)
+        except Exception as exc:
+            print(f"[ERR] Could not reach Tidarr: {exc}")
+            return 1
+        if ok:
+            print("[OK] Queue cleared.")
+        else:
+            print("[ERR] Tidarr rejected the clear request.")
+            return 1
+        return 0
+    try:
+        data = tidarr_mgmt.list_queue(cfg)
+    except Exception as exc:
+        print(f"[ERR] Could not reach Tidarr: {exc}")
+        return 1
+    items = data if isinstance(data, list) else data.get("items", data.get("data", []))
+    total = data.get("total", len(items)) if isinstance(data, dict) else len(items)
+    print(f"Queue: {total} item(s)")
+    for item in items:
+        if isinstance(item, dict):
+            print(f"  {item.get('id', '?')}\t{item.get('status', '?')}\t{item.get('title', item.get('url', ''))}")
+        else:
+            print(f"  {item}")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="spotify_to_tidal",
@@ -248,6 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Skip fetching albums for top artists.")
     sp.add_argument("--no-compilations", action="store_true",
                     help="Don't include compilations/appearances.")
+    sp.add_argument("--sources", default="tidal",
+                    help="Comma-separated list of sources to use (default: tidal).")
     sp.set_defaults(func=cmd_build)
 
     sp = sub.add_parser("match", help="Match an existing manifest to Tidal IDs.")
@@ -255,6 +386,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Don't try to match artist albums.")
     sp.add_argument("--no-playlists", action="store_true",
                     help="Don't try to match playlist tracks.")
+    sp.add_argument("--sources", default="tidal",
+                    help="Comma-separated list of sources to use (default: tidal).")
     sp.set_defaults(func=cmd_match)
 
     sp = sub.add_parser("download", help="Run tiddl on a matched manifest.")
@@ -280,6 +413,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--download-batch-pause-duration", type=float, default=900.0,
                     help="Seconds to pause after each batch of chunks. "
                          "Default 900 (15 min).")
+    sp.add_argument("--downloader",
+                    choices=["tiddl", "tidarr", "qobuz", "both", "all"],
+                    default=None,
+                    help="Download backend to use. Default: value of DOWNLOADER env var (tiddl).")
     sp.set_defaults(func=cmd_download)
 
     sp = sub.add_parser("run", help="Build + match + download in one go (default).")
@@ -307,6 +444,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--download-batch-pause-duration", type=float, default=900.0,
                     help="Seconds to pause after each batch of chunks. "
                          "Default 900 (15 min).")
+    sp.add_argument("--downloader",
+                    choices=["tiddl", "tidarr", "qobuz", "both", "all"],
+                    default=None,
+                    help="Download backend to use. Default: value of DOWNLOADER env var (tiddl).")
+    sp.add_argument("--sources", default="tidal",
+                    help="Comma-separated list of sources to use (default: tidal).")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("show", help="Print manifest summary.")
@@ -327,6 +470,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("playlists", help="Generate M3U playlists from the manifest.")
     sp.set_defaults(func=cmd_playlists)
+
+    # ------------------------------------------------------------------
+    # Tidarr management subcommands
+    # ------------------------------------------------------------------
+    sp = sub.add_parser("tidarr-sync-list", help="List Tidarr sync items.")
+    sp.set_defaults(func=cmd_tidarr_sync_list)
+
+    sp = sub.add_parser("tidarr-sync-add", help="Add a Tidarr sync item.")
+    sp.add_argument("url", help="URL of the playlist/album to sync.")
+    sp.add_argument("--title", default=None, help="Human-readable title (default: url).")
+    sp.add_argument("--type", default="playlist", dest="type",
+                    help="Item type passed to Tidarr (default: playlist).")
+    sp.set_defaults(func=cmd_tidarr_sync_add)
+
+    sp = sub.add_parser("tidarr-sync-remove", help="Remove a Tidarr sync item by id.")
+    sp.add_argument("id", help="Sync item id to remove.")
+    sp.set_defaults(func=cmd_tidarr_sync_remove)
+
+    sp = sub.add_parser("tidarr-sync-trigger", help="Trigger an immediate Tidarr sync run.")
+    sp.set_defaults(func=cmd_tidarr_sync_trigger)
+
+    sp = sub.add_parser("tidarr-history", help="Show Tidarr download history.")
+    sp.set_defaults(func=cmd_tidarr_history)
+
+    sp = sub.add_parser("tidarr-queue", help="Show or clear the Tidarr download queue.")
+    sp.add_argument("--clear", action="store_true", help="Clear the entire queue.")
+    sp.set_defaults(func=cmd_tidarr_queue)
+
     return p
 
 
@@ -343,8 +514,8 @@ def main(argv: list[str] | None = None) -> int:
         args.skip_download = False
         args.input_filename = "tidal-dl-input.txt"
         args.verbose = False
+        args.downloader = None
+        args.sources = "tidal"
     return args.func(args, cfg)
-
-
 if __name__ == "__main__":
     sys.exit(main())
