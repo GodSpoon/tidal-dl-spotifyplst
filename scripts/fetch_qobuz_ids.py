@@ -24,11 +24,21 @@ _MAX_WORKERS = 8
 _RETRY = 3
 
 
+def _track_key(track: dict) -> str:
+    """Stable key for a track to dedupe across playlists."""
+    name = (track.get("name") or "").lower()
+    artists = track.get("artists") or [""]
+    artist = (artists[0] or "").lower() if artists else ""
+    return f"{name}|{artist}"
+
+
 def _search_one(track: dict) -> tuple[dict, dict | None]:
     """Search qobuz for a Spotify track. Returns (track, qobuz_result or None)."""
-    artist = (track.get("artists") or [""])[0]
-    title = track.get("name", "")
+    artist = (track.get("artists") or [""])[0] or ""
+    title = track.get("name") or ""
     query = f"{artist} {title}".strip()
+    if not query:
+        return track, None
     session = requests.Session()
     session.headers["User-Agent"] = "spotify_to_tidal/qobuz-resolver"
 
@@ -64,16 +74,16 @@ def main() -> int:
     with open(manifest_path) as f:
         manifest = json.load(f)
 
-    # Collect unmatched tracks
+    # Collect unmatched tracks (deduped)
     unmatched: list[dict] = []
     seen_keys: set[str] = set()
     for pl in manifest.get("playlists", []):
         for t in pl.get("tracks", []):
             if t.get("matched") and (t.get("qobuz_id") or t.get("qobuz_album_id")):
-                continue  # already matched
+                continue
             if t.get("is_local"):
                 continue
-            key = f"{t.get('name', '').lower()}|{(t.get('artists') or [''])[0].lower()}"
+            key = _track_key(t)
             if key in seen_keys:
                 continue
             seen_keys.add(key)
