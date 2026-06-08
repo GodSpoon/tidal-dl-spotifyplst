@@ -17,8 +17,12 @@ import requests
 
 from ..config import AppConfig
 from ..manifest import Manifest
+try:
+    from ..progress import get_tracker
+except Exception:
+    get_tracker = None  # progress module is optional / uncommitted on some checkouts
+
 from . import DownloaderBackend
-from ..progress import get_tracker
 
 log = logging.getLogger(__name__)
 _BASE = "https://qobuz.squid.wtf"
@@ -248,9 +252,9 @@ class SquidWtfDownloader(DownloaderBackend):
             print("[squidwtf] Nothing to download.")
             return 0
 
-        tracker = get_tracker()
-        tracker.register_backend(self.name, total=len(plan))
-
+        tracker = get_tracker() if get_tracker else None
+        if tracker:
+            tracker.register_backend(self.name, total=len(plan))
         print(f"[squidwtf] Downloading {len(plan)} item(s) → {out_dir}")
         print(f"[squidwtf] Quality: {quality_label} (Qobuz format_id={quality})")
 
@@ -300,7 +304,9 @@ class SquidWtfDownloader(DownloaderBackend):
                         last_rc = 1
 
                 completed += 1
-                tracker.update_backend(self.name, completed=completed, current=task.get("album_id") or task.get("track_id"))
+                if tracker:
+                    tracker.update_backend(self.name, completed=completed, current=task.get("album_id") or task.get("track_id"))
 
-        tracker.update_backend(self.name, status="done" if last_rc == 0 else "error")
+        if tracker:
+            tracker.update_backend(self.name, status="done" if last_rc == 0 else "error")
         return last_rc
