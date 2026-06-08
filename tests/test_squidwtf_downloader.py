@@ -184,7 +184,7 @@ def test_download_track_skips_existing_file(tmp_path: Path):
         "source": "test",
     }
     mock_session = MagicMock()
-    ok, msg = _download_track(task, "27", out_dir, mock_session, "squidwtf")
+    ok, msg = _download_track(task, "27", out_dir, mock_session)
 
     assert ok is True
     assert "SKIP" in msg
@@ -224,7 +224,7 @@ def test_download_track_retries_on_429(tmp_path: Path, monkeypatch):
 
     mock_session = MagicMock()
     with patch("spotify_to_tidal.downloaders.squidwtf._stream_to_disk"):
-        ok, msg = _download_track(task, "27", out_dir, mock_session, "squidwtf")
+        ok, msg = _download_track(task, "27", out_dir, mock_session)
 
     assert ok is True
     assert call_count == 2
@@ -261,7 +261,7 @@ def test_download_track_fails_after_max_retries(tmp_path: Path, monkeypatch):
     )
 
     mock_session = MagicMock()
-    ok, msg = _download_track(task, "27", out_dir, mock_session, "squidwtf")
+    ok, msg = _download_track(task, "27", out_dir, mock_session)
 
     assert ok is False
     assert call_count == 4  # _MAX_RETRIES
