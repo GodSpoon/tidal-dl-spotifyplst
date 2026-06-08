@@ -290,7 +290,9 @@ class TiddlDownloader(DownloaderBackend):
 
         Returns the last non-zero tiddl exit code, or 0 on full success.
         """
-        input_path = cfg.output_dir / kwargs.get("input_filename", "tiddl-input.txt")
+        # Pop input_filename so it doesn't leak into run_tidal_dl (which rejects it)
+        input_filename = kwargs.pop("input_filename", "tiddl-input.txt")
+        input_path = cfg.output_dir / input_filename
         track_n, album_n = build_tidal_input_file(manifest, input_path)
         print(f"[tiddl] Wrote {track_n} tracks + {album_n} albums to {input_path}")
         return run_tidal_dl(
