@@ -83,6 +83,8 @@ def main() -> int:
     with open(manifest_path) as f:
         manifest = json.load(f)
     log.info("Loaded. %d playlists", len(manifest.get("playlists", [])))
+    # Collect unmatched tracks (deduped)
+    unmatched: list[dict] = []
     seen_keys: set[str] = set()
     for pl in manifest.get("playlists", []):
         for t in pl.get("tracks", []):
