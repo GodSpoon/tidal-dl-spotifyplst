@@ -260,26 +260,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("download", help="Run tiddl on a matched manifest.")
     sp.add_argument("--input-filename", default="tiddl-input.txt",
                     help="Filename inside output_dir for the tiddl input file.")
-    sp.add_argument("--download-chunk-size", type=int, default=10,
+    sp.add_argument("--download-chunk-size", type=int, default=15,
                     help="URLs per tiddl invocation. Smaller chunks are safer "
-                         "for avoiding Tidal rate limits. Default 10.")
+                         "for avoiding Tidal rate limits. Default 15.")
     sp.add_argument("--max-429-retries", type=int, default=4,
                     help="Times to re-run a chunk that hit Tidal's HTTP 429 "
                          "rate limit, with exponential backoff. Default 4.")
     sp.add_argument("--download-chunk-timeout", type=float, default=300.0,
                     help="Seconds to wait for one chunk before killing tiddl "
                          "(prevents hangs on stuck streams). Default 300.")
-    sp.add_argument("--download-inter-chunk-delay", type=float, default=120.0,
-                    help="Seconds to sleep between chunks (anti-ban). Default 120.")
-    sp.add_argument("--download-inter-chunk-jitter", type=float, default=30.0,
+    sp.add_argument("--download-inter-chunk-delay", type=float, default=60.0,
+                    help="Seconds to sleep between chunks (anti-ban). Default 60.")
+    sp.add_argument("--download-inter-chunk-jitter", type=float, default=20.0,
                     help="Random +/- jitter applied to inter-chunk delay. "
-                         "Default 30.")
-    sp.add_argument("--download-batch-pause-chunks", type=int, default=20,
-                    help="After N chunks, pause for a long sleep (anti-ban). "
                          "Default 20.")
-    sp.add_argument("--download-batch-pause-duration", type=float, default=1800.0,
+    sp.add_argument("--download-batch-pause-chunks", type=int, default=30,
+                    help="After N chunks, pause for a long sleep (anti-ban). "
+                         "Default 30.")
+    sp.add_argument("--download-batch-pause-duration", type=float, default=900.0,
                     help="Seconds to pause after each batch of chunks. "
-                         "Default 1800 (30 min).")
+                         "Default 900 (15 min).")
     sp.set_defaults(func=cmd_download)
 
     sp = sub.add_parser("run", help="Build + match + download in one go (default).")
@@ -288,25 +288,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-playlists", action="store_true")
     sp.add_argument("--skip-download", action="store_true",
                     help="Stop after building + matching; don't call tidal-dl.")
-    sp.add_argument("--download-chunk-size", type=int, default=10,
-                    help="URLs per tiddl invocation. Default 10.")
+    sp.add_argument("--download-chunk-size", type=int, default=15,
+                    help="URLs per tiddl invocation. Default 15.")
     sp.add_argument("--max-429-retries", type=int, default=4,
                     help="Times to re-run a chunk that hit Tidal's HTTP 429 "
                          "rate limit, with exponential backoff. Default 4.")
     sp.add_argument("--download-chunk-timeout", type=float, default=300.0,
                     help="Seconds to wait for one chunk before killing tiddl "
                          "(prevents hangs on stuck streams). Default 300.")
-    sp.add_argument("--download-inter-chunk-delay", type=float, default=120.0,
-                    help="Seconds to sleep between chunks (anti-ban). Default 120.")
-    sp.add_argument("--download-inter-chunk-jitter", type=float, default=30.0,
+    sp.add_argument("--download-inter-chunk-delay", type=float, default=60.0,
+                    help="Seconds to sleep between chunks (anti-ban). Default 60.")
+    sp.add_argument("--download-inter-chunk-jitter", type=float, default=20.0,
                     help="Random +/- jitter applied to inter-chunk delay. "
-                         "Default 30.")
-    sp.add_argument("--download-batch-pause-chunks", type=int, default=20,
-                    help="After N chunks, pause for a long sleep (anti-ban). "
                          "Default 20.")
-    sp.add_argument("--download-batch-pause-duration", type=float, default=1800.0,
+    sp.add_argument("--download-batch-pause-chunks", type=int, default=30,
+                    help="After N chunks, pause for a long sleep (anti-ban). "
+                         "Default 30.")
+    sp.add_argument("--download-batch-pause-duration", type=float, default=900.0,
                     help="Seconds to pause after each batch of chunks. "
-                         "Default 1800 (30 min).")
+                         "Default 900 (15 min).")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("show", help="Print manifest summary.")

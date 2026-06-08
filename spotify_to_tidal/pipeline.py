@@ -264,13 +264,13 @@ def download_from_manifest(
     manifest: Manifest,
     *,
     input_filename: str = "tiddl-input.txt",
-    chunk_size: int = 10,
+    chunk_size: int = 15,
     max_429_retries: int = 4,
     chunk_timeout: float = 300.0,
-    inter_chunk_delay: float = 120.0,
-    inter_chunk_jitter: float = 30.0,
-    batch_pause_chunks: int = 20,
-    batch_pause_duration: float = 1800.0,
+    inter_chunk_delay: float = 60.0,
+    inter_chunk_jitter: float = 20.0,
+    batch_pause_chunks: int = 30,
+    batch_pause_duration: float = 900.0,
 ) -> Path:
     input_path = cfg.output_dir / input_filename
     track_n, album_n = build_tidal_input_file(manifest, input_path)
@@ -300,13 +300,13 @@ def run_all(
     include_artist_albums: bool = True,
     include_playlists: bool = True,
     skip_download: bool = False,
-    download_chunk_size: int = 10,
+    download_chunk_size: int = 15,
     download_max_429_retries: int = 4,
     download_chunk_timeout: float = 300.0,
-    download_inter_chunk_delay: float = 120.0,
-    download_inter_chunk_jitter: float = 30.0,
-    download_batch_pause_chunks: int = 20,
-    download_batch_pause_duration: float = 1800.0,
+    download_inter_chunk_delay: float = 60.0,
+    download_inter_chunk_jitter: float = 20.0,
+    download_batch_pause_chunks: int = 30,
+    download_batch_pause_duration: float = 900.0,
 ) -> Manifest:
     if manifest_path.exists():
         print(f"[i] Loading existing manifest from {manifest_path}")
