@@ -25,7 +25,7 @@ class FakeBackend(DownloaderBackend):
 
 
 def test_get_downloader_names():
-    assert get_downloader_names("all") == ["tiddl", "tidarr", "qobuz"]
+    assert get_downloader_names("all") == ["tiddl", "tidarr", "qobuz", "squidwtf"]
     assert get_downloader_names("both") == ["tiddl", "tidarr"]
     assert get_downloader_names("tiddl") == ["tiddl"]
 

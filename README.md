@@ -73,6 +73,7 @@ You can swap the downloader backend via `--downloader`:
 ```bash
 python3 -m spotify_to_tidal run --downloader tidarr
 python3 -m spotify_to_tidal run --downloader both   # tiddl + tidarr
+python3 -m spotify_to_tidal run --downloader squidwtf  # headless qobuz.squid.wtf
 python3 -m spotify_to_tidal run --downloader all    # all configured sources
 ```
 
@@ -83,7 +84,8 @@ python3 -m spotify_to_tidal run --sources tidal,qobuz
 ```
 
 Supported backends: `tiddl` (default), `tidarr` (REST API), `qobuz`,
-`both` (tiddl + tidarr), and `all` (every configured source).
+`squidwtf` (headless qobuz.squid.wtf), `both` (tiddl + tidarr), and
+`all` (every configured source).
 ## Run each stage independently
 ```bash
 python3 -m spotify_to_tidal build   --manifest output/manifest.json
@@ -140,7 +142,7 @@ Everything lives in `.env`:
 | `TRANSCODE_TO_MP3` | `false` | After download, transcode FLAC → MP3 via FFmpeg. |
 | `DELETE_SOURCE_AFTER_TRANSCODE` | `false` | Remove original lossless files after transcoding. |
 | `VERSION_LIBRARY_WITH_GIT` | `false` | Auto-commit library changes in a local git repo. |
-| `DOWNLOADER` | `tiddl` | Backend: `tiddl`, `tidarr`, `qobuz`, `both`, or `all`. |
+| `DOWNLOADER` | `tiddl` | Backend: `tiddl`, `tidarr`, `qobuz`, `squidwtf`, `both`, or `all`. |
 | `TIDARR_URL` | `http://localhost:8484` | Base URL of a running Tidarr instance. |
 | `TIDARR_API_KEY` | – | API key from Tidarr settings (required when using `tidarr`). |
 | `SOURCES` | `tidal` | Comma-separated sources to enable: `tidal`, `qobuz`. |

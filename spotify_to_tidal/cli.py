@@ -414,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Seconds to pause after each batch of chunks. "
                          "Default 900 (15 min).")
     sp.add_argument("--downloader",
-                    choices=["tiddl", "tidarr", "qobuz", "both", "all"],
+                    choices=["tiddl", "tidarr", "qobuz", "squidwtf", "both", "all"],
                     default=None,
                     help="Download backend to use. Default: value of DOWNLOADER env var (tiddl).")
     sp.set_defaults(func=cmd_download)
@@ -445,7 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Seconds to pause after each batch of chunks. "
                          "Default 900 (15 min).")
     sp.add_argument("--downloader",
-                    choices=["tiddl", "tidarr", "qobuz", "both", "all"],
+                    choices=["tiddl", "tidarr", "qobuz", "squidwtf", "both", "all"],
                     default=None,
                     help="Download backend to use. Default: value of DOWNLOADER env var (tiddl).")
     sp.add_argument("--sources", default="tidal",

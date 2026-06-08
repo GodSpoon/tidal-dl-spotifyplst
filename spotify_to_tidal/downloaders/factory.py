@@ -5,15 +5,17 @@ from . import DownloaderBackend
 from .tiddl import TiddlDownloader
 from .tidarr import TidarrDownloader
 from .qobuz import QobuzDownloader
+from .squidwtf import SquidWtfDownloader
 
 _BACKENDS: dict[str, type[DownloaderBackend]] = {
     "tiddl": TiddlDownloader,
     "tidarr": TidarrDownloader,
     "qobuz": QobuzDownloader,
+    "squidwtf": SquidWtfDownloader,
 }
 
 # Canonical expansion lists for virtual aliases
-_ALL_BACKENDS: list[str] = ["tiddl", "tidarr", "qobuz"]
+_ALL_BACKENDS: list[str] = ["tiddl", "tidarr", "qobuz", "squidwtf"]
 _BOTH_BACKENDS: list[str] = ["tiddl", "tidarr"]
 
 
