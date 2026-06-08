@@ -43,11 +43,19 @@ class TrackEntry:
     tidal_title: Optional[str] = None
     tidal_artist: Optional[str] = None
     tidal_album: Optional[str] = None
+    tidal_album_id: Optional[int] = None
     tidal_duration: Optional[int] = None
     match_score: Optional[float] = None
     match_reasons: Optional[list[str]] = None
     matched: bool = False
     error: Optional[str] = None  # e.g., "below threshold", "no candidates"
+    # Qobuz match fields:
+    qobuz_id: Optional[str] = None
+    qobuz_title: Optional[str] = None
+    qobuz_artist: Optional[str] = None
+    qobuz_album: Optional[str] = None
+    qobuz_album_id: Optional[str] = None
+    qobuz_duration: Optional[int] = None
 
 
 @dataclass
@@ -69,6 +77,12 @@ class AlbumEntry:
     match_reasons: Optional[list[str]] = None
     matched: bool = False
     error: Optional[str] = None
+    # Qobuz match fields:
+    qobuz_id: Optional[str] = None
+    qobuz_title: Optional[str] = None
+    qobuz_artist: Optional[str] = None
+    qobuz_release_date: Optional[str] = None
+    qobuz_num_tracks: Optional[int] = None
 
 
 @dataclass
@@ -274,11 +288,18 @@ def _track_from_dict(d: dict) -> TrackEntry:
         tidal_title=d.get("tidal_title"),
         tidal_artist=d.get("tidal_artist"),
         tidal_album=d.get("tidal_album"),
+        tidal_album_id=d.get("tidal_album_id"),
         tidal_duration=d.get("tidal_duration"),
         match_score=d.get("match_score"),
         match_reasons=d.get("match_reasons"),
         matched=bool(d.get("matched", False)),
         error=d.get("error"),
+        qobuz_id=d.get("qobuz_id"),
+        qobuz_title=d.get("qobuz_title"),
+        qobuz_artist=d.get("qobuz_artist"),
+        qobuz_album=d.get("qobuz_album"),
+        qobuz_album_id=d.get("qobuz_album_id"),
+        qobuz_duration=d.get("qobuz_duration"),
     )
 
 
@@ -300,6 +321,11 @@ def _album_from_dict(d: dict) -> AlbumEntry:
         match_reasons=d.get("match_reasons"),
         matched=bool(d.get("matched", False)),
         error=d.get("error"),
+        qobuz_id=d.get("qobuz_id"),
+        qobuz_title=d.get("qobuz_title"),
+        qobuz_artist=d.get("qobuz_artist"),
+        qobuz_release_date=d.get("qobuz_release_date"),
+        qobuz_num_tracks=d.get("qobuz_num_tracks"),
     )
 
 

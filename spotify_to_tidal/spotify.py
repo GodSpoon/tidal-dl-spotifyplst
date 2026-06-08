@@ -116,6 +116,7 @@ class SpotifyClient:
                 # Rate limited - respect Retry-After
                 wait = int(r.headers.get("Retry-After", "1"))
                 time.sleep(min(wait, 10))
+                last_exc = RuntimeError(f"Rate limited (Retry-After: {wait}s)")
                 continue
             if r.status_code >= 500:
                 time.sleep(0.5 * (2 ** attempt))

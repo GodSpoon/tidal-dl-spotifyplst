@@ -21,6 +21,7 @@ from typing import Optional
 
 from .spotify import SpotifyTrack, SpotifyAlbum, SpotifyArtist
 from .tidal import TidalTrack, TidalAlbum, TidalArtist
+from .qobuz import QobuzTrack, QobuzAlbum
 
 # ---------- string normalization ----------
 
@@ -298,3 +299,104 @@ def match_artist(spotify: SpotifyArtist, tidal_candidates: list[TidalArtist]) ->
 TRACK_MATCH_THRESHOLD = 55.0
 ALBUM_MATCH_THRESHOLD = 60.0
 ARTIST_MATCH_THRESHOLD = 80.0
+
+
+# ---------- Qobuz matchers ----------
+
+def match_track_qobuz(
+    spotify: SpotifyTrack,
+    qobuz_candidates: list[QobuzTrack],
+) -> tuple[Optional[QobuzTrack], Match]:
+    """Score Qobuz search results against a Spotify track. Same rubric as match_track."""
+    if not qobuz_candidates:
+        return None, Match(0.0, ["no candidates"])
+
+    best: Optional[QobuzTrack] = None
+    best_score = -1e9
+    best_reasons: list[str] = []
+
+    for t in qobuz_candidates:
+        score = 0.0
+        reasons: list[str] = []
+        if _isrc_match(spotify.isrc, t.isrc):
+            score += 100.0
+            reasons.append(f"isrc={t.isrc}")
+        ts, exact_title = _title_score(spotify.name, t.title)
+        score += ts
+        if ts:
+            reasons.append(f"title={ts:.0f}" + ("*" if exact_title else ""))
+        a_score = _artist_score(spotify.artists, [t.artist])
+        score += a_score
+        reasons.append(f"artist={a_score:.0f}")
+        # Qobuz duration_ms → convert to seconds for _duration_score
+        score += _duration_score(spotify.duration_ms, t.duration_ms // 1000)
+        if t.album and spotify.album:
+            album_ratio = _ratio(spotify.album.name, t.album)
+            if album_ratio >= 0.95:
+                score += 8.0
+                reasons.append("album+8")
+            elif album_ratio >= 0.7:
+                score += 3.0
+        version_words = ("remix", "edit", "mix", "version", "live", "remaster", "karaoke", "instrumental")
+        s_norm = _norm(spotify.name)
+        t_norm = _norm(t.title)
+        for w in version_words:
+            if w in t_norm and w not in s_norm:
+                score -= 12.0
+                reasons.append(f"{w}-12")
+        if t.explicit and not spotify.explicit:
+            score -= 4.0
+            reasons.append("explicit-4")
+        if score > best_score:
+            best_score = score
+            best = t
+            best_reasons = reasons
+
+    return best, Match(best_score, best_reasons)
+
+
+def match_album_qobuz(
+    spotify: SpotifyAlbum,
+    qobuz_candidates: list[QobuzAlbum],
+) -> tuple[Optional[QobuzAlbum], Match]:
+    """Score Qobuz search results against a Spotify album. Same rubric as match_album."""
+    if not qobuz_candidates:
+        return None, Match(0.0, ["no candidates"])
+
+    best: Optional[QobuzAlbum] = None
+    best_score = -1e9
+    best_reasons: list[str] = []
+
+    s_year = (spotify.release_date or "")[:4]
+
+    for a in qobuz_candidates:
+        score = 0.0
+        reasons: list[str] = []
+        ts, exact = _title_score(spotify.name, a.title)
+        score += ts
+        reasons.append(f"title={ts:.0f}" + ("*" if exact else ""))
+        score += _artist_score(spotify.artists, [a.artist])
+        t_year = (a.release_date or "")[:4]
+        if s_year and t_year and s_year == t_year:
+            score += 12.0
+            reasons.append("year+12")
+        elif s_year and t_year:
+            try:
+                if abs(int(s_year) - int(t_year)) <= 1:
+                    score += 4.0
+            except ValueError:
+                pass
+        score += _track_count_score(spotify.total_tracks, a.total_tracks)
+        sp_type = spotify.album_type
+        if sp_type == "single" and a.total_tracks <= 3:
+            score += 6.0
+        elif sp_type == "album" and a.total_tracks >= 5:
+            score += 6.0
+        elif sp_type == "compilation" and a.total_tracks >= 8:
+            score += 4.0
+        if score > best_score:
+            best_score = score
+            best = a
+            best_reasons = reasons
+
+    return best, Match(best_score, best_reasons)

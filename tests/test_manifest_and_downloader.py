@@ -1,7 +1,9 @@
-"""Tests for manifest serialization and tidal-dl input file generation."""
+"""Tests for manifest serialization, tidal-dl input file generation, and the
+429-retry wrapper around tiddl in the downloader."""
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,7 +17,10 @@ from spotify_to_tidal.manifest import (  # noqa: E402
     PlaylistEntry,
     new_manifest,
 )
-from spotify_to_tidal.downloader import build_tidal_input_file  # noqa: E402
+from spotify_to_tidal.downloader import (  # noqa: E402
+    build_tidal_input_file,
+    run_tidal_dl,
+)
 
 
 def _sample_manifest() -> Manifest:
@@ -156,6 +161,225 @@ def test_manifest_handles_missing_optional_fields(tmp_path: Path):
     m.compute_stats()
     assert m.stats["playlists"] == 1
 
+
+def test_qobuz_fields_roundtrip(tmp_path: Path):
+    """Qobuz fields on TrackEntry and AlbumEntry survive a JSON round-trip."""
+    import json as _json
+    track = TrackEntry(
+        spotify_id="t_q", spotify_uri="spotify:track:t_q",
+        name="Clair de lune", duration_ms=300000,
+        artists=["Debussy"], album="Pour le piano", album_id="al_q",
+        isrc="FRABX0000001", explicit=False,
+        qobuz_id="12345678",
+        qobuz_title="Clair de lune",
+        qobuz_artist="Debussy",
+        qobuz_album="Pour le piano",
+        qobuz_album_id="98765",
+        qobuz_duration=301,
+        matched=True,
+    )
+    d = _json.loads(_json.dumps(track.__dict__))
+    # Simulate round-trip through _track_from_dict by saving/loading a manifest
+    m = new_manifest("test_user")
+    pl = PlaylistEntry(
+        spotify_id="pl_q", name="Qobuz Pl", owner="test_user",
+        description="", public=False, collaborative=False,
+        track_count=1, tracks=[track],
+    )
+    m.playlists.append(pl)
+    out = tmp_path / "qobuz_rt.json"
+    m.save_json(out)
+    loaded = Manifest.load_json(out)
+    lt = loaded.playlists[0].tracks[0]
+    assert lt.qobuz_id == "12345678"
+    assert lt.qobuz_title == "Clair de lune"
+    assert lt.qobuz_artist == "Debussy"
+    assert lt.qobuz_album == "Pour le piano"
+    assert lt.qobuz_album_id == "98765"
+    assert lt.qobuz_duration == 301
+
+
+def test_qobuz_album_fields_roundtrip(tmp_path: Path):
+    """Qobuz fields on AlbumEntry survive a JSON round-trip."""
+    album = AlbumEntry(
+        spotify_id="al_q", spotify_uri="spotify:album:al_q",
+        name="Pour le piano", artists=["Debussy"],
+        album_type="album", total_tracks=3, release_date="1901-01-01",
+        qobuz_id="qal_001",
+        qobuz_title="Pour le piano",
+        qobuz_artist="Claude Debussy",
+        qobuz_release_date="1901-01-01",
+        qobuz_num_tracks=3,
+        matched=True,
+    )
+    m = new_manifest("test_user2")
+    from spotify_to_tidal.manifest import ArtistEntry
+    ar = ArtistEntry(
+        spotify_id="ar_q", name="Debussy",
+        genres=["classical"], popularity=70, followers=500_000,
+        albums=[album],
+    )
+    m.artists.append(ar)
+    out = tmp_path / "qobuz_al_rt.json"
+    m.save_json(out)
+    loaded = Manifest.load_json(out)
+    la = loaded.artists[0].albums[0]
+    assert la.qobuz_id == "qal_001"
+    assert la.qobuz_title == "Pour le piano"
+    assert la.qobuz_artist == "Claude Debussy"
+    assert la.qobuz_release_date == "1901-01-01"
+    assert la.qobuz_num_tracks == 3
+
+
+def test_qobuz_fields_default_none():
+    """New Qobuz fields default to None on existing construction patterns."""
+    t = TrackEntry(
+        spotify_id="t_x", spotify_uri="spotify:track:t_x",
+        name="Song", duration_ms=180000,
+        artists=["Artist"], album="Album", album_id="al_x",
+        isrc="", explicit=False,
+    )
+    assert t.qobuz_id is None
+    assert t.qobuz_title is None
+    assert t.qobuz_album_id is None
+    assert t.qobuz_duration is None
+    al = AlbumEntry(
+        spotify_id="al_x", spotify_uri="spotify:album:al_x",
+        name="Album", artists=["Artist"],
+        album_type="album", total_tracks=10, release_date="2020-01-01",
+    )
+    assert al.qobuz_id is None
+    assert al.qobuz_num_tracks is None
+
+def _write_input(tmp_path: Path, urls: list[str]) -> Path:
+    p = tmp_path / "urls.txt"
+    p.write_text("\n".join(urls) + "\n", encoding="utf-8")
+    return p
+
+
+class _FakeResult:
+    def __init__(self, rc: int, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = rc
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_run_tidal_dl_retries_on_429_then_succeeds(tmp_path, monkeypatch):
+    """A chunk that 429s on the first attempt and succeeds on the second
+    must trigger exactly one retry and return 0 overall."""
+    inp = _write_input(tmp_path, [
+        "https://tidal.com/track/1",
+        "https://tidal.com/track/2",
+    ])
+    calls: list[dict] = []
+
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
+        calls.append({"capture_output": capture_output})
+        if len(calls) == 1:
+            return _FakeResult(1)  # streamed first attempt: non-zero
+        if len(calls) == 2:
+            # captured diagnostic run: shows a 429 line
+            return _FakeResult(
+                1,
+                stdout="API Error: Response body does not contain valid json., 429/0 (track/1)\n",
+            )
+        return _FakeResult(0)  # retry succeeds
+    sleeps: list[float] = []
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=3,
+        sleep_fn=sleeps.append,
+    )
+    assert rc == 0
+    assert len(calls) == 3, f"expected 1 streamed + 1 captured + 1 retried, got {calls}"
+    # first run streamed (no capture), diagnostic run captured, retry streamed
+    assert calls[0]["capture_output"] is False
+    assert calls[1]["capture_output"] is True
+    assert calls[2]["capture_output"] is False
+    # one backoff sleep, ~2s
+    assert sleeps == [2]
+
+
+def test_run_tidal_dl_does_not_retry_non_429_error(tmp_path, monkeypatch):
+    """A chunk that errors out for a non-429 reason (e.g. tiddl crash) must
+    NOT trigger a retry — we only recover from rate-limits."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
+        calls.append({"capture_output": capture_output})
+        if len(calls) == 1:
+            return _FakeResult(2)  # streamed
+        if len(calls) == 2:
+            return _FakeResult(2, stderr="Traceback ... ValueError: nope\n")
+        return _FakeResult(0)  # unreachable
+    sleeps: list[float] = []
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=3,
+        sleep_fn=sleeps.append,
+    )
+    assert rc == 2
+    assert len(calls) == 2  # streamed + captured diagnostic, then gave up
+    assert sleeps == []  # no backoff
+
+
+def test_run_tidal_dl_gives_up_after_max_429_retries(tmp_path, monkeypatch):
+    """If a chunk keeps 429ing past max_429_retries, we stop retrying and
+    return tiddl's last rc."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+    sleep_count = 0
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
+        nonlocal sleep_count
+        calls.append({"capture_output": capture_output})
+        if capture_output:
+            sleep_count += 1
+            return _FakeResult(
+                1,
+                stdout="API Error: ..., 429/0 (track/1)\n",
+            )
+        return _FakeResult(1)  # streamed attempt: still 429'ing
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=2,
+        sleep_fn=lambda _s: None,
+    )
+    assert rc == 1
+    # streamed, captured, streamed, captured, streamed = 5 invocations
+    # before the 2nd retry's check (attempt >= max) trips
+    assert len(calls) == 5
+
+
+def test_run_tidal_dl_times_out_on_hung_chunk(tmp_path, monkeypatch):
+    """If tiddl hangs longer than chunk_timeout, we kill it and move on."""
+    inp = _write_input(tmp_path, ["https://tidal.com/track/1"])
+    calls: list[dict] = []
+
+    def fake_run(cmd, check=False, capture_output=False, text=False, timeout=None):  # noqa: ARG001
+        calls.append({"capture_output": capture_output, "timeout": timeout})
+        raise subprocess.TimeoutExpired(cmd="tiddl", timeout=timeout)
+
+    monkeypatch.setattr("spotify_to_tidal.downloader.subprocess.run", fake_run)
+    rc = run_tidal_dl(
+        inp,
+        output_dir=tmp_path / "out",
+        chunk_size=10,
+        max_429_retries=0,
+        chunk_timeout=5.0,
+        sleep_fn=lambda _s: None,
+    )
+    assert rc == 1
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == 5.0
 
 if __name__ == "__main__":
     import pytest

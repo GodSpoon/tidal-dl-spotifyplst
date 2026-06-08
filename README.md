@@ -44,10 +44,10 @@ pipx install tidal-dl
 
 ```bash
 # Spotify (browser PKCE)
-python -m spotify_to_tidal login
+python3 -m spotify_to_tidal login
 
 # Tidal — for the search/match stage (uses tidal-dl internally)
-python -m spotify_to_tidal tidal-login
+python3 -m spotify_to_tidal tidal-login
 #   (or, if tidal-dl isn't logged in yet: just run `tidal-dl` once)
 
 # Tidal — for the download stage (uses tiddl, separate session)
@@ -57,7 +57,7 @@ tiddl auth login
 ## Run the full pipeline
 
 ```bash
-python -m spotify_to_tidal run
+python3 -m spotify_to_tidal run
 ```
 
 This will:
@@ -67,18 +67,56 @@ This will:
 - Search Tidal for each track/album
 - Write `output/manifest.json` and `output/manifest.csv`
 - Write `output/tiddl-input.txt` (one Tidal URL per line)
-- Invoke `tiddl download -p tiddl_downloads -q max url` in chunks
+- Invoke the chosen downloader (`tiddl` by default) in chunks
 
+You can swap the downloader backend via `--downloader`:
+```bash
+python3 -m spotify_to_tidal run --downloader tidarr
+python3 -m spotify_to_tidal run --downloader both   # tiddl + tidarr
+python3 -m spotify_to_tidal run --downloader squidwtf  # headless qobuz.squid.wtf
+python3 -m spotify_to_tidal run --downloader all    # all configured sources
+```
+
+To include Qobuz in the download, set `SOURCES=tidal,qobuz` (or `SOURCES=qobuz`) in `.env`
+and provide `QOBUZ_APP_ID`. You can also pass `--sources` per invocation:
+```bash
+python3 -m spotify_to_tidal run --sources tidal,qobuz
+```
+
+Supported backends: `tiddl` (default), `tidarr` (REST API), `qobuz`,
+`squidwtf` (headless qobuz.squid.wtf), `both` (tiddl + tidarr), and
+`all` (every configured source).
 ## Run each stage independently
+```bash
+python3 -m spotify_to_tidal build   --manifest output/manifest.json
+python3 -m spotify_to_tidal match   --manifest output/manifest.json
+python3 -m spotify_to_tidal download --manifest output/manifest.json --downloader tidarr
+# Tidal's API rate-limits (HTTP 429) some downloads mid-run; both
+# `download` and `run` auto-retry those chunks with exponential backoff.
+# Tunable via --max-429-retries (default 4) and --download-chunk-size
+# (default 15). Re-running is essentially free — tiddl skips files it
+# already wrote.
+# inspect a manifest
+python3 -m spotify_to_tidal show -v --manifest output/manifest.json
+```
+
+## Post-processing (optional)
+
+Once downloads finish you can organise, transcode, and generate playlists:
 
 ```bash
-python -m spotify_to_tidal build   --manifest output/manifest.json
-python -m spotify_to_tidal match   --manifest output/manifest.json
-python -m spotify_to_tidal download --manifest output/manifest.json
+# Move files from tiddl_downloads into your library (e.g., Navidrome/Plexamp)
+python3 -m spotify_to_tidal organize
 
-# inspect a manifest
-python -m spotify_to_tidal show -v --manifest output/manifest.json
+# Transcode FLAC → MP3 with FFmpeg (Apple-Silicon-optimised V0 VBR by default)
+python3 -m spotify_to_tidal transcode
+
+# Generate .m3u8 playlists in the library directory
+python3 -m spotify_to_tidal playlists
 ```
+
+Enable automatic Git versioning of the library by setting
+`VERSION_LIBRARY_WITH_GIT=true` in `.env`.
 
 ## Why so many subcommands?
 
@@ -99,6 +137,43 @@ Everything lives in `.env`:
 | `OUTPUT_DIR` | `./output` | Manifest and tiddl input file land here. |
 | `TIDAL_DOWNLOAD_DIR` | `./tiddl_downloads` | Where tiddl writes files. |
 | `TIDAL_QUALITY` | `max` | One of `max`, `high`, `normal`, `low` (tiddl's vocabulary). |
+| `LIBRARY_DIR` | – | Destination for organized music (e.g., `/Volumes/media/Audio/Music`). |
+| `LIBRARY_SCHEMA` | `{artist}/{album}/{track}…` | Path template for file organisation. |
+| `TRANSCODE_TO_MP3` | `false` | After download, transcode FLAC → MP3 via FFmpeg. |
+| `DELETE_SOURCE_AFTER_TRANSCODE` | `false` | Remove original lossless files after transcoding. |
+| `VERSION_LIBRARY_WITH_GIT` | `false` | Auto-commit library changes in a local git repo. |
+| `DOWNLOADER` | `tiddl` | Backend: `tiddl`, `tidarr`, `qobuz`, `squidwtf`, `both`, or `all`. |
+| `TIDARR_URL` | `http://localhost:8484` | Base URL of a running Tidarr instance. |
+| `TIDARR_API_KEY` | – | API key from Tidarr settings (required when using `tidarr`). |
+| `SOURCES` | `tidal` | Comma-separated sources to enable: `tidal`, `qobuz`. |
+| `QOBUZ_APP_ID` | – | Qobuz application ID (required when `qobuz` in `SOURCES`). |
+| `QOBUZ_AUTH_TOKEN` | – | Qobuz auth token (optional; obtained via Qobuz login flow). |
+
+## Tidarr management commands
+
+If you use the `tidarr` downloader (or just keep a Tidarr instance around),
+these commands talk directly to the Tidarr REST API:
+
+```bash
+# List sync items
+python3 -m spotify_to_tidal tidarr-sync-list
+
+# Add a playlist/artist/album to the auto-sync list
+python3 -m spotify_to_tidal tidarr-sync-add https://listen.tidal.com/playlist/abc123 --title "My Playlist"
+
+# Remove a sync item by id
+python3 -m spotify_to_tidal tidarr-sync-remove abc123
+
+# Trigger an immediate sync run
+python3 -m spotify_to_tidal tidarr-sync-trigger
+
+# View download history
+python3 -m spotify_to_tidal tidarr-history
+
+# View or clear the download queue
+python3 -m spotify_to_tidal tidarr-queue
+python3 -m spotify_to_tidal tidarr-queue --clear
+```
 
 ## Manifest format
 
@@ -177,14 +252,27 @@ spotify_to_tidal/
 ├── auth.py            # Spotify OAuth PKCE
 ├── spotify.py         # Spotify Web API client
 ├── tidal.py           # Tidal search via tidal-dl
-├── matcher.py         # Spotify→Tidal scoring
+├── qobuz.py           # Qobuz API client
+├── matcher.py         # Spotify→Tidal/Qobuz scoring
 ├── manifest.py        # JSON/CSV manifest
-├── downloader.py      # tiddl subprocess driver
+├── downloader.py      # backward-compat shim
+├── downloaders/       # modular downloader backends
+│   ├── __init__.py
+│   ├── factory.py
+│   ├── tiddl.py
+│   ├── tidarr.py
+│   └── qobuz.py
+├── tidarr_mgmt.py     # Tidarr REST API helpers
+├── organizer.py       # library file organisation
+├── playlists.py       # .m3u8 generation
+├── transcode.py       # FLAC → MP3
+├── git_version.py     # library git versioning
 └── pipeline.py        # stage orchestration
 
 tests/
 ├── test_manifest_and_downloader.py
 ├── test_matcher.py
+├── test_multi_source.py
 ├── test_none_artist_regression.py
 └── test_spotify_none_handling.py
 ```
