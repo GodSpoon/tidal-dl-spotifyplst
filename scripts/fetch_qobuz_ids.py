@@ -68,14 +68,21 @@ def _search_one(track: dict) -> tuple[dict, dict | None]:
 
 
 def main() -> int:
-    manifest_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("output/manifest.json")
-    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else manifest_path
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("manifest", nargs="?", default="output/manifest.json")
+    parser.add_argument("output", nargs="?", default=None)
+    parser.add_argument("--save-every", type=int, default=500,
+                        help="Save manifest every N resolved tracks (default: 500)")
+    args = parser.parse_args()
 
+    manifest_path = Path(args.manifest)
+    output_path = Path(args.output) if args.output else manifest_path
+
+    log.info("Loading manifest from %s", manifest_path)
     with open(manifest_path) as f:
         manifest = json.load(f)
-
-    # Collect unmatched tracks (deduped)
-    unmatched: list[dict] = []
+    log.info("Loaded. %d playlists", len(manifest.get("playlists", [])))
     seen_keys: set[str] = set()
     for pl in manifest.get("playlists", []):
         for t in pl.get("tracks", []):
@@ -92,6 +99,7 @@ def main() -> int:
     log.info("Resolving qobuz IDs for %d unmatched tracks...", len(unmatched))
 
     resolved = 0
+    last_save = 0
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
         futures = {pool.submit(_search_one, t): t for t in unmatched}
         for i, fut in enumerate(as_completed(futures), 1):
@@ -102,12 +110,14 @@ def main() -> int:
                 resolved += 1
             if i % 100 == 0:
                 log.info("  ... %d / %d done (%d resolved)", i, len(unmatched), resolved)
-
+            if resolved - last_save >= args.save_every:
+                with open(output_path, "w") as f:
+                    json.dump(manifest, f, separators=(",", ":"))
+                last_save = resolved
+                log.info("  saved %d resolved tracks to disk", resolved)
     log.info("Resolved %d / %d tracks to qobuz IDs", resolved, len(unmatched))
-
     with open(output_path, "w") as f:
-        json.dump(manifest, f, indent=2)
-
+        json.dump(manifest, f, separators=(",", ":"))
     log.info("Updated manifest written to %s", output_path)
     return 0
 
