@@ -30,7 +30,7 @@ def _search_one(track: dict) -> tuple[dict, dict | None]:
     title = track.get("name", "")
     query = f"{artist} {title}".strip()
     session = requests.Session()
-    session.headers["User-Agent"] = "spotify_to_tidal/qobuz-resolver"}
+    session.headers["User-Agent"] = "spotify_to_tidal/qobuz-resolver"
 
     for attempt in range(_RETRY):
         try:
