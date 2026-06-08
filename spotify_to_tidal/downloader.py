@@ -100,13 +100,13 @@ def run_tidal_dl(
     quality: str = "high",
     tidal_dl_bin: str | None = None,
     extra_args: list[str] | None = None,
-    chunk_size: int = 25,
+    chunk_size: int = 10,
     max_429_retries: int = 4,
     chunk_timeout: float = 300.0,
-    inter_chunk_delay: float = 45.0,
-    inter_chunk_jitter: float = 15.0,
-    batch_pause_chunks: int = 50,
-    batch_pause_duration: float = 600.0,
+    inter_chunk_delay: float = 120.0,
+    inter_chunk_jitter: float = 30.0,
+    batch_pause_chunks: int = 20,
+    batch_pause_duration: float = 1800.0,
     sleep_fn=time.sleep,
     random_fn=random.random,
 ) -> int:
@@ -117,11 +117,11 @@ def run_tidal_dl(
     `#` comments tolerated). tiddl has no batch-input flag, so we chunk
     the URLs into batches of `chunk_size` and invoke the CLI per batch.
 
-    Anti-ban measures:
+    Anti-ban measures (based on tidarr + community best practices):
     - Default quality "high" (not "max") to reduce API load.
-    - Small chunks (default 25) with a delay + jitter between each.
-    - After every `batch_pause_chunks` chunks, pause for
-      `batch_pause_duration` seconds (default 50 chunks / 10 min).
+    - Small chunks (default 10, matching tidarr's DOWNLOAD_BATCH_SIZE=10)
+      with a 2-minute delay + jitter between each chunk.
+    - After every 20 chunks (~200 tracks), pause for 30 min to cool down.
     - 429 rate-limit retry with exponential backoff.
     - chunk_timeout kills hung tiddl processes.
 
