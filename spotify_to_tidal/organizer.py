@@ -124,6 +124,7 @@ class OrganizeConfig:
     library_dir: Path
     schema: str = DEFAULT_SCHEMA
     copy: bool = False
+    link: bool = False
 
 
 @dataclass
@@ -431,10 +432,12 @@ def organize_file(
             action="skipped",
             reason="same size already present",
         )
-
     try:
         final_dest.parent.mkdir(parents=True, exist_ok=True)
-        if cfg.copy:
+        if cfg.link:
+            os.link(source, final_dest)
+            action = "linked"
+        elif cfg.copy:
             shutil.copy2(source, final_dest)
             action = "copied"
         else:
@@ -516,9 +519,6 @@ def _guess_tidal_id_from_path(path: Path) -> Optional[int]:
         m = _TIDAL_ID_RE.search(part)
         if m:
             return int(m.group(1))
-    return None
-
-
 def organize_from_manifest(
     manifest: Manifest,
     cfg: AppConfig,
@@ -526,6 +526,7 @@ def organize_from_manifest(
     *,
     schema: str = DEFAULT_SCHEMA,
     copy: bool = False,
+    link: bool = False,
 ) -> list[OrganizeResult]:
     """Organize downloaded files guided by matched manifest entries.
 
@@ -556,7 +557,7 @@ def organize_from_manifest(
     list[OrganizeResult]
         One result per audio file processed under ``tidal_download_dir``.
     """
-    org_cfg = OrganizeConfig(library_dir=library_dir, schema=schema, copy=copy)
+    org_cfg = OrganizeConfig(library_dir=library_dir, schema=schema, copy=copy, link=link)
     id_index = _build_tidal_id_index(manifest)
     source_dir = cfg.tidal_download_dir
 

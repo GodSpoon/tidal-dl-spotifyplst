@@ -108,8 +108,20 @@ Once downloads finish you can organise, transcode, and generate playlists:
 # Move files from tiddl_downloads into your library (e.g., Navidrome/Plexamp)
 python3 -m spotify_to_tidal organize
 
+# Auto-import downloads into beets (MusicBrainz tagging + library organisation)
+python3 -m spotify_to_tidal beets
+# Or enable automatic beets import after every download:
+#   USE_BEETS=true in .env
+# Then run with --beets:
+#   python3 -m spotify_to_tidal run --beets
+
 # Transcode FLAC → MP3 with FFmpeg (Apple-Silicon-optimised V0 VBR by default)
 python3 -m spotify_to_tidal transcode
+
+# Mirror-transcode FLAC library to a parallel MP3 tree (keeps both formats)
+# Set MP3_LIBRARY_DIR in .env, or pass --mirror explicitly:
+python3 -m spotify_to_tidal transcode --mirror /mnt/music/mp3 --workers 0
+# --workers 0 auto-detects CPU count for parallel encoding
 
 # Generate .m3u8 playlists in the library directory
 python3 -m spotify_to_tidal playlists
@@ -137,11 +149,14 @@ Everything lives in `.env`:
 | `OUTPUT_DIR` | `./output` | Manifest and tiddl input file land here. |
 | `TIDAL_DOWNLOAD_DIR` | `./tiddl_downloads` | Where tiddl writes files. |
 | `TIDAL_QUALITY` | `max` | One of `max`, `high`, `normal`, `low` (tiddl's vocabulary). |
-| `LIBRARY_DIR` | – | Destination for organized music (e.g., `/Volumes/media/Audio/Music`). |
+| `LIBRARY_DIR` | – | Destination for organized music (e.g., `/Volumes/music` or `/mnt/music/flac`). |
 | `LIBRARY_SCHEMA` | `{artist}/{album}/{track}…` | Path template for file organisation. |
+| `MP3_LIBRARY_DIR` | – | Mirror-transcode destination (e.g., `/mnt/music/mp3`). |
 | `TRANSCODE_TO_MP3` | `false` | After download, transcode FLAC → MP3 via FFmpeg. |
 | `DELETE_SOURCE_AFTER_TRANSCODE` | `false` | Remove original lossless files after transcoding. |
+| `TRANSCODE_WORKERS` | `1` | Parallel transcoding threads. `0` = auto (CPU count). |
 | `VERSION_LIBRARY_WITH_GIT` | `false` | Auto-commit library changes in a local git repo. |
+| `USE_BEETS` | `false` | Auto-import downloads into beets after each run. |
 | `DOWNLOADER` | `tiddl` | Backend: `tiddl`, `tidarr`, `qobuz`, `squidwtf`, `both`, or `all`. |
 | `TIDARR_URL` | `http://localhost:8484` | Base URL of a running Tidarr instance. |
 | `TIDARR_API_KEY` | – | API key from Tidarr settings (required when using `tidarr`). |

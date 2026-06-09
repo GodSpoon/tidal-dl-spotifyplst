@@ -1,17 +1,7 @@
-"""Drive `tiddl` (https://github.com/oskvr37/tiddl) to download everything in a manifest.
-
-We extract every `https://tidal.com/...` URL from the manifest and feed
-them to `tiddl download url` in chunks. tiddl is preferred over the
-older `tidal-dl` because it ships with a Tidal API key that the
-current Tidal CDN accepts for playback URLs (the upstream tidal-dl
-
-Backward-compatibility shim: the real implementation now lives in
-``spotify_to_tidal/downloaders/tiddl.py``. This module re-exports every
-public name so existing callers continue to work without changes.
-"""
+"""Backward-compatibility shim: real implementation lives in downloaders/tiddl.py."""
 from __future__ import annotations
 
-import subprocess  # noqa: F401 — exposed so tests can patch `spotify_to_tidal.downloader.subprocess.run`
+import subprocess  # noqa: F401 — exposed so tests can patch spotify_to_tidal.downloader.subprocess.run
 
 from .downloaders.tiddl import (
     _RATE_LIMIT_RE,

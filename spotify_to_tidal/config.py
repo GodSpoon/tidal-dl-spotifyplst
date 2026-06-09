@@ -48,10 +48,14 @@ class AppConfig:
     # Library organisation (new)
     library_dir: Optional[Path] = None
     library_schema: str = "{artist}/{album}/{track_num:02d} - {title}.{ext}"
+    mp3_library_dir: Optional[Path] = None
     # Post-processing toggles (new)
     transcode_to_mp3: bool = False
     delete_source_after_transcode: bool = False
     version_library_with_git: bool = False
+    transcode_workers: int = 1
+    # Beets integration
+    use_beets: bool = False
     # Downloader backend selection
     downloader: str = "tiddl"
     tidarr_url: str = "http://localhost:8484"
@@ -84,15 +88,18 @@ def _load_env() -> dict[str, str]:
         "TIDAL_QUALITY",
         "LIBRARY_DIR",
         "LIBRARY_SCHEMA",
+        "MP3_LIBRARY_DIR",
         "TRANSCODE_TO_MP3",
         "DELETE_SOURCE_AFTER_TRANSCODE",
         "VERSION_LIBRARY_WITH_GIT",
+        "TRANSCODE_WORKERS",
         "DOWNLOADER",
         "TIDARR_URL",
         "TIDARR_API_KEY",
         "SOURCES",
         "QOBUZ_APP_ID",
         "QOBUZ_AUTH_TOKEN",
+        "USE_BEETS",
     ):
         real = os.environ.get(key)
         if real:
@@ -117,13 +124,15 @@ def load_config() -> AppConfig:
             tidal_quality=env.get("TIDAL_QUALITY", "max"),
             library_dir=Path(library_dir_raw).expanduser() if library_dir_raw else None,
             library_schema=env.get("LIBRARY_SCHEMA", "{artist}/{album}/{track_num:02d} - {title}.{ext}"),
+            mp3_library_dir=Path(env.get("MP3_LIBRARY_DIR")).expanduser() if env.get("MP3_LIBRARY_DIR") else None,
             transcode_to_mp3=env.get("TRANSCODE_TO_MP3", "").lower() in ("1", "true", "yes"),
             delete_source_after_transcode=env.get("DELETE_SOURCE_AFTER_TRANSCODE", "").lower() in ("1", "true", "yes"),
             version_library_with_git=env.get("VERSION_LIBRARY_WITH_GIT", "").lower() in ("1", "true", "yes"),
+            transcode_workers=int(env.get("TRANSCODE_WORKERS", "1")),
+            use_beets=env.get("USE_BEETS", "").lower() in ("1", "true", "yes"),
             downloader=env.get("DOWNLOADER", "tiddl"),
             tidarr_url=env.get("TIDARR_URL", "http://localhost:8484"),
             tidarr_api_key=env.get("TIDARR_API_KEY") or None,
-            sources=[s.strip() for s in env.get("SOURCES", "tidal").split(",") if s.strip()],
             enable_qobuz="qobuz" in [s.strip() for s in env.get("SOURCES", "tidal").split(",") if s.strip()],
             qobuz_app_id=env.get("QOBUZ_APP_ID") or None,
             qobuz_auth_token=env.get("QOBUZ_AUTH_TOKEN") or None,

@@ -37,9 +37,8 @@ from .pipeline import (
 )
 from .tidal import TidalNotLoggedIn, ensure_tidal_logged_in
 
-# New post-processing modules (imported lazily inside commands when possible)
-from . import git_version, organizer, playlists, transcode, tidarr_mgmt
-
+from . import dedupe as _dedupe_lib, git_version, library as _library_lib, organizer, playlists, transcode, tidarr_mgmt
+from . import beets_mgmt
 
 def _manifest_path(args, cfg) -> Path:
     p = getattr(args, "manifest", None) or (cfg.output_dir / "manifest.json")
@@ -103,7 +102,7 @@ def cmd_download(args, cfg):
         print(f"[ERR] No manifest at {out}. Run `build` (and `match`) first.")
         return 2
     m = Manifest.load_json(out)
-    download_from_manifest(
+    rc = download_from_manifest(
         cfg, m,
         downloader=args.downloader,
         input_filename=args.input_filename,
@@ -115,7 +114,11 @@ def cmd_download(args, cfg):
         batch_pause_chunks=args.download_batch_pause_chunks,
         batch_pause_duration=args.download_batch_pause_duration,
     )
-    return 0
+    if getattr(args, "beets", False) or cfg.use_beets:
+        beets_rc = beets_mgmt.import_downloads(cfg)
+        if beets_rc != 0 and rc == 0:
+            rc = beets_rc
+    return rc
 
 
 def cmd_show(args, cfg):
@@ -163,7 +166,20 @@ def cmd_run(args, cfg):
     except TidalNotLoggedIn as e:
         print(f"[ERR] {e}")
         return 1
+    if getattr(args, "beets", False) or cfg.use_beets:
+        beets_mgmt.import_downloads(cfg)
     return 0
+def cmd_beets(args, cfg):
+    """Manually trigger beets import on the download directory or a given path."""
+    if args.path:
+        target = Path(args.path).expanduser().resolve()
+    else:
+        target = cfg.tidal_download_dir.expanduser().resolve()
+    return beets_mgmt.import_directory(
+        target,
+        singletons=args.singletons,
+        quiet=not args.verbose,
+    )
 
 
 def cmd_organize(args, cfg):
@@ -182,9 +198,10 @@ def cmd_organize(args, cfg):
             library_dir=cfg.library_dir,
             schema=cfg.library_schema,
             copy=args.copy,
+            link=args.link,
         ),
     )
-    moved = sum(1 for r in results if r.action in ("moved", "copied"))
+    moved = sum(1 for r in results if r.action in ("moved", "copied", "linked"))
     skipped = sum(1 for r in results if r.action == "skipped")
     print(f"[OK] {moved} files organized, {skipped} skipped.")
     if cfg.version_library_with_git:
@@ -196,14 +213,39 @@ def cmd_organize(args, cfg):
 
 
 def cmd_transcode(args, cfg):
+    workers = args.workers if args.workers is not None else cfg.transcode_workers
+    delete = args.delete_source or cfg.delete_source_after_transcode
+
+    if args.mirror or cfg.mp3_library_dir:
+        src = Path(args.root).expanduser() if args.root else cfg.library_dir
+        dst = Path(args.mirror).expanduser() if args.mirror and isinstance(args.mirror, str) else cfg.mp3_library_dir
+        if not src:
+            print("[ERR] No library directory configured and --root not given.")
+            return 2
+        if not dst:
+            print("[ERR] Mirror mode requested but MP3_LIBRARY_DIR is not set and --mirror not given.")
+            return 2
+        print(f"[i] Mirror-transcoding FLAC → MP3 (workers={workers}) …")
+        ok, fail, skipped = transcode.transcode_mirror(
+            src, dst,
+            delete_source=delete,
+            workers=workers,
+        )
+        print(f"[OK] {ok} transcoded, {fail} failed, {skipped} skipped.")
+        if cfg.version_library_with_git:
+            git_version.ensure_library_versioned(dst)
+            git_version.commit_library_changes(dst, f"transcode mirror: {ok} files")
+        return 0
+
     root = Path(args.root).expanduser() if args.root else cfg.library_dir
     if not root:
         print("[ERR] No library directory configured and --root not given.")
         return 2
-    print(f"[i] Transcoding lossless files in {root} …")
+    print(f"[i] Transcoding lossless files in {root} (workers={workers}) …")
     ok, fail = transcode.transcode_directory(
         root,
-        delete_source=args.delete_source or cfg.delete_source_after_transcode,
+        delete_source=delete,
+        workers=workers,
     )
     print(f"[OK] {ok} transcoded, {fail} failures.")
     if cfg.version_library_with_git:
@@ -230,6 +272,76 @@ def cmd_playlists(args, cfg):
         )
     return 0
 
+def cmd_dedupe(args, cfg):
+    root = Path(args.root).expanduser().resolve()
+    if not root.exists():
+        print(f"[ERR] Path does not exist: {root}")
+        return 2
+    workers = getattr(args, "workers", None)
+    action = args.action
+    report = _dedupe_lib.find_duplicates(
+        root,
+        max_workers=workers or 8,
+        min_size=args.min_size,
+    )
+    if not report.groups:
+        print("[OK] No duplicates found.")
+        return 0
+    print(f"\nDuplicate groups: {report.duplicate_groups}")
+    print(f"Duplicate files:  {report.duplicate_files}")
+    print(f"Space reclaimable: {_dedupe_lib._human_size(report.bytes_reclaimable)}")
+    for grp in report.groups:
+        print(f"\n  Keeper: {grp.keeper.path}")
+        for dup in grp.files:
+            if dup != grp.keeper:
+                print(f"    dupe: {dup.path}")
+    if not args.apply:
+        print("\n[DRY RUN] Pass --apply to execute the action.")
+        return 0
+    resolved = _dedupe_lib.DedupeAction.resolve(action, root)
+    total_freed = 0
+    for grp in report.groups:
+        resolved.set_keeper(grp.keeper)
+        for dup in grp.files:
+            if dup != grp.keeper:
+                result = resolved.perform(dup.path)
+                if result:
+                    total_freed += dup.size
+    print(f"\n[OK] Freed {_dedupe_lib._human_size(total_freed)}")
+    return 0
+def cmd_library(args, cfg):
+    source = Path(args.source).expanduser().resolve()
+    target = Path(args.target).expanduser().resolve()
+    if not source.exists():
+        print(f"[ERR] Source does not exist: {source}")
+        return 2
+    manifest = None
+    out = _manifest_path(args, cfg)
+    if out.exists():
+        manifest = Manifest.load_json(out)
+    result = _library_lib.build_library(
+        source_dir=source,
+        target_dir=target,
+        profile=args.profile,
+        manifest=manifest,
+        dedupe_after=args.dedupe,
+        transcoding=args.transcoding,
+        delete_source_after_transcode=args.delete_source,
+        schema=args.schema,
+        copy=args.copy,
+        link=args.link,
+        min_size=args.min_size,
+    )
+    print(f"[OK] Organised {result.files_organized} files.")
+    if result.files_transcoded > 0:
+        print(f"     Transcoded {result.files_transcoded} files.")
+    if result.duplicates_found > 0:
+        print(f"     Removed {result.duplicates_found} duplicates "
+              f"({_dedupe_lib._human_size(result.bytes_saved)} reclaimed).")
+    if result.playlists_written > 0:
+        print(f"     Wrote {result.playlists_written} playlists.")
+    print(f"     Output: {target}")
+    return 0
 
 # ---------------------------------------------------------------------------
 # Tidarr management commands
@@ -417,14 +529,17 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["tiddl", "tidarr", "qobuz", "squidwtf", "both", "all"],
                     default=None,
                     help="Download backend to use. Default: value of DOWNLOADER env var (tiddl).")
+    sp.add_argument("--beets", action="store_true",
+                    help="After downloading, run beets import on the download directory.")
     sp.set_defaults(func=cmd_download)
-
     sp = sub.add_parser("run", help="Build + match + download in one go (default).")
     sp.add_argument("--top", type=int, default=500, help="Top artists to fetch (default 500).")
     sp.add_argument("--no-artist-albums", action="store_true")
     sp.add_argument("--no-playlists", action="store_true")
     sp.add_argument("--skip-download", action="store_true",
                     help="Stop after building + matching; don't call tidal-dl.")
+    sp.add_argument("--beets", action="store_true",
+                    help="After downloading, run beets import on the download directory.")
     sp.add_argument("--download-chunk-size", type=int, default=15,
                     help="URLs per tiddl invocation. Default 15.")
     sp.add_argument("--max-429-retries", type=int, default=4,
@@ -456,21 +571,79 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-v", "--verbose", action="store_true",
                     help="Also list unmatched items.")
     sp.set_defaults(func=cmd_show)
-
     sp = sub.add_parser("organize", help="Move downloaded files into the library directory.")
     sp.add_argument("--copy", action="store_true",
                     help="Copy instead of move.")
+    sp.add_argument("--link", action="store_true",
+                    help="Hardlink instead of move (preserves download cache).")
     sp.set_defaults(func=cmd_organize)
 
     sp = sub.add_parser("transcode", help="Transcode lossless files to MP3 with FFmpeg.")
     sp.add_argument("--root", help="Directory to scan (default: LIBRARY_DIR).")
     sp.add_argument("--delete-source", action="store_true",
                     help="Remove original lossless files after transcoding.")
+    sp.add_argument("--workers", type=int, default=None,
+                    help="Parallel transcoding workers (default: TRANSCODE_WORKERS env var, or 1). "
+                         "Use 0 for auto (CPU count).")
+    sp.add_argument("--mirror", nargs="?", const=True, default=None, metavar="DIR",
+                    help="Mirror-transcode to a separate MP3 library tree. "
+                         "Preserves directory structure.  With no argument, uses MP3_LIBRARY_DIR. "
+                         "With a path, mirrors to that directory.")
     sp.set_defaults(func=cmd_transcode)
 
     sp = sub.add_parser("playlists", help="Generate M3U playlists from the manifest.")
     sp.set_defaults(func=cmd_playlists)
-
+    # ------------------------------------------------------------------
+    # Library management commands
+    # ------------------------------------------------------------------
+    sp = sub.add_parser("dedupe", help="Find and resolve duplicate audio files.")
+    sp.add_argument("root", nargs="?", default=".",
+                    help="Directory to scan (default: current directory).")
+    sp.add_argument("--action",
+                    choices=["list", "delete", "hardlink", "symlink", "quarantine"],
+                    default="list",
+                    help="What to do with duplicates (default: list).")
+    sp.add_argument("--apply", action="store_true",
+                    help="Actually perform the action (dry-run by default).")
+    sp.add_argument("--workers", type=int, default=None,
+                    help="Thread pool size for parallel I/O (default: 8).")
+    sp.add_argument("--min-size", type=int, default=0,
+                    help="Ignore files smaller than this many bytes (default: 0).")
+    sp.set_defaults(func=cmd_dedupe)
+    sp = sub.add_parser("beets", help="Import audio files into beets.")
+    sp.add_argument("path", nargs="?", default=None,
+                    help="Directory to import (default: TIDAL_DOWNLOAD_DIR).")
+    sp.add_argument("--singletons", action="store_true", default=True,
+                    help="Import tracks as singletons (default).")
+    sp.add_argument("--no-singletons", dest="singletons", action="store_false",
+                    help="Import albums instead of singletons.")
+    sp.add_argument("--verbose", action="store_true",
+                    help="Show full beets output instead of quiet mode.")
+    sp.set_defaults(func=cmd_beets)
+    sp = sub.add_parser("library", help="Build a target-specific organised music library.")
+    sp.add_argument("source", help="Source directory containing raw audio files.")
+    sp.add_argument("target", help="Target directory for the organised library.")
+    sp.add_argument("--profile",
+                    choices=["plexamp", "navidrome", "rockbox"],
+                    default="plexamp",
+                    help="Target platform (default: plexamp).")
+    sp.add_argument("--dedupe", action="store_true",
+                    help="Run deduplication inside the target library.")
+    sp.add_argument("--transcoding",
+                    choices=["mp3_v0", "mp3_320"],
+                    default=None,
+                    help="Transcode to MP3 format after organising.")
+    sp.add_argument("--delete-source", action="store_true",
+                    help="Remove originals after successful transcoding.")
+    sp.add_argument("--copy", action="store_true",
+                    help="Copy files instead of moving them.")
+    sp.add_argument("--link", action="store_true",
+                    help="Hardlink files instead of moving them (preserves download cache).")
+    sp.add_argument("--schema", default=None,
+                    help="Path template (e.g. {artist}/{album}/{title}.{ext}).")
+    sp.add_argument("--min-size", type=int, default=0,
+                    help="Ignore files smaller than this many bytes (default: 0).")
+    sp.set_defaults(func=cmd_library)
     # ------------------------------------------------------------------
     # Tidarr management subcommands
     # ------------------------------------------------------------------

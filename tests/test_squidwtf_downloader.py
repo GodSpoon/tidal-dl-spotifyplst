@@ -1,9 +1,10 @@
 """Tests for the squidwtf headless downloader backend."""
 from __future__ import annotations
-
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -184,9 +185,10 @@ def test_download_track_skips_existing_file(tmp_path: Path):
         "source": "test",
     }
     mock_session = MagicMock()
-    ok, msg = _download_track(task, "27", out_dir, mock_session)
+    ok, msg, tag = _download_track(task, "27", out_dir, mock_session)
 
     assert ok is True
+    assert tag == "skip"
     assert "SKIP" in msg
     mock_session.get.assert_not_called()
 
@@ -224,9 +226,9 @@ def test_download_track_retries_on_429(tmp_path: Path, monkeypatch):
 
     mock_session = MagicMock()
     with patch("spotify_to_tidal.downloaders.squidwtf._stream_to_disk"):
-        ok, msg = _download_track(task, "27", out_dir, mock_session)
-
+        ok, msg, tag = _download_track(task, "27", out_dir, mock_session)
     assert ok is True
+    assert tag == "ok"
     assert call_count == 2
     assert sleeps == [2.0]
 
@@ -261,9 +263,10 @@ def test_download_track_fails_after_max_retries(tmp_path: Path, monkeypatch):
     )
 
     mock_session = MagicMock()
-    ok, msg = _download_track(task, "27", out_dir, mock_session)
+    ok, msg, tag = _download_track(task, "27", out_dir, mock_session)
 
     assert ok is False
+    assert tag == "fail"
     assert call_count == 4  # _MAX_RETRIES
     assert len(sleeps) == 3  # sleep between attempts, not after last
 

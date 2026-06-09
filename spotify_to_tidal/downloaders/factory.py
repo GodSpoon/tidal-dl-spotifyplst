@@ -3,20 +3,14 @@ from __future__ import annotations
 
 from . import DownloaderBackend
 from .tiddl import TiddlDownloader
-from .tidarr import TidarrDownloader
 from .qobuz import QobuzDownloader
 from .squidwtf import SquidWtfDownloader
 
 _BACKENDS: dict[str, type[DownloaderBackend]] = {
     "tiddl": TiddlDownloader,
-    "tidarr": TidarrDownloader,
     "qobuz": QobuzDownloader,
     "squidwtf": SquidWtfDownloader,
 }
-
-# Canonical expansion lists for virtual aliases
-_ALL_BACKENDS: list[str] = ["tiddl", "tidarr", "qobuz", "squidwtf"]
-_BOTH_BACKENDS: list[str] = ["tiddl", "tidarr"]
 
 
 def list_backends() -> list[str]:
@@ -26,14 +20,11 @@ def list_backends() -> list[str]:
 def get_downloader_names(name: str) -> list[str]:
     """Expand a virtual or literal downloader name to a list of backend names.
 
-    - ``"all"``  → ``["tiddl", "tidarr", "qobuz"]``
-    - ``"both"`` → ``["tiddl", "tidarr"]``
+    - ``"all"``  → ``["tiddl", "qobuz", "squidwtf"]``
     - any other string → ``[name]``
     """
     if name == "all":
-        return list(_ALL_BACKENDS)
-    if name == "both":
-        return list(_BOTH_BACKENDS)
+        return list(_BACKENDS.keys())
     return [name]
 
 
